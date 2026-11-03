@@ -2,11 +2,57 @@ name: CD
 on:
   push:
     branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      verify_only:
+        description: Verify Vault readers without building or releasing an APK
+        type: boolean
+        default: true
+permissions:
+  contents: read
 jobs:
+  verify-vault-readers:
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.verify_only) ||
+      (github.event_name == 'push' && contains(github.event.head_commit.message, '[vault-readers-only]'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Read canonical Vault records using short-lived GitHub OIDC
+        uses: hashicorp/vault-action@v3
+        with:
+          url: https://vault.downops.win
+          method: jwt
+          path: github-actions
+          role: wallettracker-mobile-ci
+          jwtGithubAudience: https://vault.downops.win
+          secrets: |
+            downops/data/apps/wallettracker/mobile KEYSTORE_BASE64 ;
+            downops/data/apps/wallettracker/mobile KEYSTORE_PASSWORD ;
+            downops/data/apps/wallettracker/mobile KEY_ALIAS ;
+            downops/data/apps/wallettracker/mobile API_BASE_URL ;
+            downops/data/apps/wallettracker/signing SIGN_SECRET_WORD
+      - name: Verify delivery without exposing values or creating artifacts
+        run: |
+          python3 - <<'PY'
+          import base64, os
+          required = ('KEYSTORE_BASE64', 'KEYSTORE_PASSWORD', 'KEY_ALIAS', 'API_BASE_URL', 'SIGN_SECRET_WORD')
+          if not all(os.environ.get(key) for key in required):
+              raise SystemExit('A required canonical Vault field is missing')
+          if not base64.b64decode(''.join(os.environ['KEYSTORE_BASE64'].split()), validate=True):
+              raise SystemExit('Keystore decoding failed')
+          print('Canonical Vault readers verified; no APK build or release performed')
+          PY
   release:
+    if: >-
+      !((github.event_name == 'workflow_dispatch' && inputs.verify_only) ||
+      (github.event_name == 'push' && contains(github.event.head_commit.message, '[vault-readers-only]')))
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
 
@@ -36,14 +82,17 @@ jobs:
         uses: hashicorp/vault-action@v3
         with:
           url: https://vault.downops.win
-          token: ${{ secrets.VAULT_TOKEN }}
+          method: jwt
+          path: github-actions
+          role: wallettracker-mobile-ci
+          jwtGithubAudience: https://vault.downops.win
           secrets: |
-            secret/data/wallet-tracker/app KEYSTORE_BASE64 ;
-            secret/data/wallet-tracker/app KEYSTORE_PASSWORD ;
-            secret/data/wallet-tracker/app KEY_PASSWORD ;
-            secret/data/wallet-tracker/app KEY_ALIAS ;
-            secret/data/wallet-tracker/app API_BASE_URL ;
-            secret/data/wallet-tracker/app SIGN_SECRET_WORD
+            downops/data/apps/wallettracker/mobile KEYSTORE_BASE64 ;
+            downops/data/apps/wallettracker/mobile KEYSTORE_PASSWORD ;
+            downops/data/apps/wallettracker/mobile KEYSTORE_PASSWORD | KEY_PASSWORD ;
+            downops/data/apps/wallettracker/mobile KEY_ALIAS ;
+            downops/data/apps/wallettracker/mobile API_BASE_URL ;
+            downops/data/apps/wallettracker/signing SIGN_SECRET_WORD
 
       - name: Set up JDK 17
         if: steps.check_release.outputs.exists == 'false'
@@ -67,18 +116,21 @@ jobs:
         if: steps.check_release.outputs.exists == 'false'
         id: sign_apk
         run: |
+          set -eu
+          umask 077
+          trap 'rm -f keystore.jks' EXIT
           BUILD_TOOLS=$(ls /usr/local/lib/android/sdk/build-tools/ | sort -V | tail -1)
           BUILD_TOOLS_DIR="/usr/local/lib/android/sdk/build-tools/$BUILD_TOOLS"
-          echo "${{ env.KEYSTORE_BASE64 }}" | base64 --decode > keystore.jks
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > keystore.jks
           UNSIGNED_APK=$(find app/build/outputs/apk/release -name "*.apk" | head -1)
           ALIGNED_APK="${UNSIGNED_APK%.apk}-aligned.apk"
           SIGNED_APK="${UNSIGNED_APK%.apk}-signed.apk"
           "$BUILD_TOOLS_DIR/zipalign" -v 4 "$UNSIGNED_APK" "$ALIGNED_APK"
           "$BUILD_TOOLS_DIR/apksigner" sign \
             --ks keystore.jks \
-            --ks-pass "pass:${{ env.KEYSTORE_PASSWORD }}" \
-            --key-pass "pass:${{ env.KEY_PASSWORD }}" \
-            --ks-key-alias "${{ env.KEY_ALIAS }}" \
+            --ks-pass env:KEYSTORE_PASSWORD \
+            --key-pass env:KEY_PASSWORD \
+            --ks-key-alias "$KEY_ALIAS" \
             --out "$SIGNED_APK" \
             "$ALIGNED_APK"
           rm -f keystore.jks
