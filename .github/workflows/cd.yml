@@ -1,3 +1,4 @@
+# Canonical Vault readers: marked maintenance commits verify without APK builds/releases.
 name: CD
 on:
   push:
