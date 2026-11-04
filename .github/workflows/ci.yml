@@ -17,6 +17,8 @@ jobs:
           java-version: '17'
           distribution: temurin
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
       - uses: gradle/actions/setup-gradle@v4
       - name: Verify source API contract
         run: python3 delivery/verify_contract.py
