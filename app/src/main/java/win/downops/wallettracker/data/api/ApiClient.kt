@@ -1,6 +1,5 @@
 package win.downops.wallettracker.data.api
 
-import android.widget.Toast
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import win.downops.wallettracker.BuildConfig
@@ -18,7 +17,7 @@ import win.downops.wallettracker.util.Logger
 import java.util.concurrent.TimeUnit
 
 object ApiClient {
-    private const val BASE_URL = BuildConfig.API_BASE_URL
+    private val BASE_URL = ApiUrls.baseUrl(BuildConfig.API_BASE_URL)
 
     private val okHttpClient by lazy {
 
@@ -40,11 +39,10 @@ object ApiClient {
         return withContext(Dispatchers.IO) {
             try {
                 val request = Request.Builder()
-                    .url("${BASE_URL}/api/v${BuildConfig.API_VERSION}/health")
+                    .url(ApiUrls.readinessUrl(BASE_URL, BuildConfig.API_VERSION))
                     .head()
                     .build()
-                val response = okHttpClient.newCall(request).execute()
-                response.isSuccessful
+                okHttpClient.newCall(request).execute().use { it.isSuccessful }
             } catch (e: Exception) {
                 Logger.log("Server check failed: ${e::class.simpleName} - ${e.message}")
                 false
@@ -58,4 +56,3 @@ object ApiClient {
     val season: SeasonEndpoints by lazy { retrofit.create(SeasonEndpoints::class.java) }
     val importe: ImporteEndpoints by lazy { retrofit.create(ImporteEndpoints::class.java) }
 }
-
