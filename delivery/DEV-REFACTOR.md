@@ -106,8 +106,8 @@ For stable CI signing, the owner must provision **a separate development key**:
 - Then set project31 variable `DEV_SIGNING_READY=true`.
 
 Do not copy the production APK signing key or backend identity into this record.
-`downops/apps/wallettracker/mobile` is the existing production APK record;
-`downops/apps/wallettracker/signing` is the legacy backend `SIGN_SECRET_WORD`,
+`downops/apps/wallettracker/prod/mobile` is the owner-specified production APK record;
+`downops/apps/wallettracker/prod/signing` is the legacy backend `SIGN_SECRET_WORD`,
 not an Android keystore. The earlier proposed `wallettracker/dev/android-signing`
 path was never provisioned by this task and must not be created.
 No Vault records, policies or roles were written by this implementation. The API
