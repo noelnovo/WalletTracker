@@ -115,6 +115,14 @@ python3 delivery/verify_contract.py
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
+Optional live private-network device check (no credentials or finance mutations):
+
+```sh
+adb shell am instrument -w -e liveDevApi true win.downops.wallettracker.debug.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+The non-secret installation/live acceptance receipt is `delivery/dev-verification.json`.
+
 Device tests cover encrypted persistence/account isolation, conflict decisions,
 durable undo, UI-edit/acknowledgement races and authenticated encryption's
 record binding. Real fingerprint interaction still needs owner acceptance; no
