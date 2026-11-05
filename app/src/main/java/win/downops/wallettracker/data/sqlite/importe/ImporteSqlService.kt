@@ -84,31 +84,6 @@ class ImporteSqlService @Inject constructor(
         }
     }
 
-    @SuppressLint("SimpleDateFormat")
-    override suspend fun createAll(importes: List<Importe>): AppResult<Unit> = withContext(Dispatchers.IO) {
-        try {
-            database?.beginTransaction()
-            try {
-                for (importe in importes) {
-                    val values = ContentValues().apply {
-                        put("concept", importe.getConcept())
-                        put("importeDate", SimpleDateFormat("yyyy-MM-dd").format(importe.getDate()))
-                        put("amount", importe.getAmount())
-                        put("balanceAfter", importe.getBalanceAfter())
-                        put("seasonId", importe.getSeasonId())
-                    }
-                    database?.insert("Importe", null, values)
-                }
-                database?.setTransactionSuccessful()
-            } finally {
-                database?.endTransaction()
-            }
-            AppResult.Success("Importes created successfully", Unit)
-        } catch (e: Exception) {
-            AppResult.Error(e.message ?: "Unexpected error creating importes", isControlled = false, e.stackTrace.joinToString("\n"))
-        }
-    }
-
     override suspend fun deleteById(importeId: Long): AppResult<Unit> = withContext(Dispatchers.IO) {
         try {
             val rowsDeleted = database?.delete("Importe", "id = ?", arrayOf(importeId.toString()))

@@ -1,4 +1,11 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
+    <style name="Theme.WalletTracker.Modern" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">#81D5BA</item>
+        <item name="colorSecondary">#B2CCC0</item>
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowSoftInputMode">adjustResize</item>
+    </style>
     <!-- Base application theme. -->
     <style name="Theme.WalletTracker" parent="Theme.MaterialComponents.DayNight.DarkActionBar">
         <!-- Primary brand color. -->

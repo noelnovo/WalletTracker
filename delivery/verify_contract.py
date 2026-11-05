@@ -14,13 +14,15 @@ def main():
     args = parser.parse_args()
     contract = json.loads((ROOT / 'delivery/integration-contract.json').read_text())
     assert contract['production_api'] == 'https://api.downops.win'
-    assert contract['api_version'] == '1'
-    client = (ROOT / 'app/src/main/java/win/downops/wallettracker/data/api/ApiClient.kt').read_text()
-    assert 'ApiUrls.baseUrl(BuildConfig.API_BASE_URL)' in client
-    assert 'ApiUrls.readinessUrl(BASE_URL, BuildConfig.API_VERSION)' in client
-    assert '.use { it.isSuccessful }' in client
-    urls = (ROOT / 'app/src/main/java/win/downops/wallettracker/data/api/ApiUrls.kt').read_text()
-    assert 'api/v$version/ready' in urls
+    assert contract['api_version'] == '2'
+    client = (ROOT / 'app/src/main/java/win/downops/wallettracker/v2/FinanceApi.kt').read_text()
+    assert 'https://' in client and '.use { response ->' in client
+    assert '.followRedirects(false)' in client
+    manifest = (ROOT / 'app/src/main/AndroidManifest.xml').read_text()
+    assert 'android:allowBackup="false"' in manifest
+    assert 'android:usesCleartextTraffic="false"' in manifest
+    assert 'android.intent.action.SEND' not in manifest
+    assert not contract['embedded_shared_secret']
     assert contract['preserve_existing_account_and_tenant_crypto']
     if args.live:
         request = urllib.request.Request(

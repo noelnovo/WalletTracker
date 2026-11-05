@@ -1,8 +1,6 @@
-# Main pushes verify the preserved signing readers. APK publication is manual.
+# Legacy mirror release tooling is manual only. Dev delivery runs on GitLab.
 name: CD
 on:
-  push:
-    branches: [ main ]
   workflow_dispatch:
     inputs:
       verify_only:
@@ -14,8 +12,7 @@ permissions:
 jobs:
   verify-vault-readers:
     if: >-
-      (github.event_name == 'workflow_dispatch' && inputs.verify_only) ||
-      github.event_name == 'push'
+      github.event_name == 'workflow_dispatch' && inputs.verify_only
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -33,13 +30,12 @@ jobs:
             downops/data/apps/wallettracker/mobile KEYSTORE_BASE64 ;
             downops/data/apps/wallettracker/mobile KEYSTORE_PASSWORD ;
             downops/data/apps/wallettracker/mobile KEY_ALIAS ;
-            downops/data/apps/wallettracker/mobile API_BASE_URL ;
-            downops/data/apps/wallettracker/signing SIGN_SECRET_WORD
+            downops/data/apps/wallettracker/mobile API_BASE_URL
       - name: Verify delivery without exposing values or creating artifacts
         run: |
           python3 - <<'PY'
           import base64, os
-          required = ('KEYSTORE_BASE64', 'KEYSTORE_PASSWORD', 'KEY_ALIAS', 'API_BASE_URL', 'SIGN_SECRET_WORD')
+          required = ('KEYSTORE_BASE64', 'KEYSTORE_PASSWORD', 'KEY_ALIAS', 'API_BASE_URL')
           if not all(os.environ.get(key) for key in required):
               raise SystemExit('A required canonical Vault field is missing')
           if not base64.b64decode(''.join(os.environ['KEYSTORE_BASE64'].split()), validate=True):
@@ -48,7 +44,7 @@ jobs:
           PY
   release:
     if: >-
-      github.event_name == 'workflow_dispatch' && !inputs.verify_only
+      github.event_name == 'workflow_dispatch' && !inputs.verify_only && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -91,14 +87,13 @@ jobs:
             downops/data/apps/wallettracker/mobile KEYSTORE_PASSWORD ;
             downops/data/apps/wallettracker/mobile KEYSTORE_PASSWORD | KEY_PASSWORD ;
             downops/data/apps/wallettracker/mobile KEY_ALIAS ;
-            downops/data/apps/wallettracker/mobile API_BASE_URL ;
-            downops/data/apps/wallettracker/signing SIGN_SECRET_WORD
+            downops/data/apps/wallettracker/mobile API_BASE_URL
 
-      - name: Set up JDK 17
+      - name: Set up JDK 21
         if: steps.check_release.outputs.exists == 'false'
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
+          java-version: '21'
           distribution: 'temurin'
 
       - name: Setup Gradle
@@ -110,7 +105,6 @@ jobs:
         run: ./gradlew assembleRelease
         env:
           API_BASE_URL: ${{ env.API_BASE_URL }}
-          SIGN_SECRET: ${{ env.SIGN_SECRET_WORD }}
 
       - name: Sign APK
         if: steps.check_release.outputs.exists == 'false'

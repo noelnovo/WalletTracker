@@ -1,8 +1,8 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
-val majorVersion = 2
-val minorVersion = 2
-val patchVersion = 2
+val majorVersion = 3
+val minorVersion = 0
+val patchVersion = 0
 
 plugins {
     alias(libs.plugins.android.application)
@@ -18,7 +18,7 @@ android {
     defaultConfig {
         applicationId = "win.downops.wallettracker"
         minSdk = 24
-        targetSdk = 34
+        targetSdk = 36
         versionCode = majorVersion * 10000 + minorVersion * 100 + patchVersion
         versionName = "$majorVersion.$minorVersion.$patchVersion"
 
@@ -30,23 +30,34 @@ android {
         viewBinding = true
     }
 
+    val devKeyFile = System.getenv("DEV_KEYSTORE_FILE")
+    if (!devKeyFile.isNullOrBlank()) {
+        signingConfigs.create("development") {
+            storeFile = file(devKeyFile)
+            storePassword = System.getenv("DEV_KEYSTORE_PASSWORD")
+            keyAlias = System.getenv("DEV_KEY_ALIAS")
+            keyPassword = System.getenv("DEV_KEY_PASSWORD")
+        }
+    }
     buildTypes {
         debug {
-            buildConfigField("String", "API_BASE_URL", "\"http://127.0.0.1:5000\"")
-            buildConfigField("String", "API_VERSION", "\"1\"")
-            buildConfigField("String", "SIGN_SECRET", "\"s0m3r4nd0mt3xt\"")
+            if (!devKeyFile.isNullOrBlank()) signingConfig = signingConfigs.getByName("development")
+            buildConfigField("String", "API_BASE_URL", "\"https://wallettracker-dev.int.downops.win\"")
+            buildConfigField("String", "API_VERSION", "\"2\"")
+            buildConfigField("boolean", "ALLOW_REGISTER", "true")
+            buildConfigField("String", "SIGN_SECRET", "\"\"") // Legacy v1 code only; never used by v2.
             isDebuggable = true
             applicationIdSuffix = ".debug"
-            versionNameSuffix = "-debug"
+            versionNameSuffix = "-dev"
 
         }
         release {
-          val apiBaseUrl = System.getenv("API_BASE_URL") ?: ""
-          val signSecret = System.getenv("SIGN_SECRET") ?: ""
+          val apiBaseUrl = System.getenv("API_BASE_URL") ?: "https://api.downops.win"
 
           buildConfigField("String", "API_BASE_URL", "\"$apiBaseUrl\"")
-          buildConfigField("String", "API_VERSION", "\"1\"")
-          buildConfigField("String", "SIGN_SECRET", "\"$signSecret\"")
+          buildConfigField("String", "API_VERSION", "\"2\"")
+          buildConfigField("boolean", "ALLOW_REGISTER", "false")
+          buildConfigField("String", "SIGN_SECRET", "\"\"")
           isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),

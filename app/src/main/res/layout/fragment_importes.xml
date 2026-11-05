@@ -42,16 +42,6 @@
             android:layout_weight="1" />
 
         <ImageButton
-            android:id="@+id/btnImportCsv"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:src="@drawable/ic_grid"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="Importar CSV"
-            android:layout_marginStart="8dp"
-            app:tint="@color/design_default_color_primary" />
-
-        <ImageButton
             android:id="@+id/btnEmptySeason"
             android:layout_width="48dp"
             android:layout_height="48dp"

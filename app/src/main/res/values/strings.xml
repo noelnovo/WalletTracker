@@ -8,7 +8,6 @@
     <string name="action_settings">Reset expenses</string>
 
     <string name="menu_home">Home</string>
-    <string name="menu_sheet">.CSV import</string>
     <string name="menu_categories" tools:ignore="ExtraTranslation">Categories</string>
     <string name="menu_categoriesexpenses">Expenses</string>
     <string name="menu_settings">Settings</string>

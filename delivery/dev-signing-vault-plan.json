@@ -1,0 +1,21 @@
+{
+  "status": "owner-provisioned-only; not applied by this task",
+  "kv_mount": "wallettracker",
+  "kv_v2_path": "dev/android-signing",
+  "required_keys": ["KEYSTORE_BASE64", "KEYSTORE_PASSWORD", "KEY_ALIAS", "KEY_PASSWORD"],
+  "policy": "path \"wallettracker/data/dev/android-signing\" { capabilities = [\"read\"] }",
+  "auth_mount": "gitlab-ci",
+  "role": "wallettracker-android-ci-dev",
+  "role_settings": {
+    "role_type": "jwt",
+    "user_claim": "user_id",
+    "bound_audiences": ["https://vault.int.downops.win"],
+    "bound_claims": {"project_id": "31", "namespace_path": "downops", "ref_type": "branch", "ref": "dev"},
+    "token_policies": ["wallettracker-android-ci-dev"],
+    "token_no_default_policy": true,
+    "token_type": "batch",
+    "token_ttl": 900,
+    "token_max_ttl": 900
+  },
+  "enable_after_provisioning": "Set GitLab project31 CI variable DEV_SIGNING_READY=true. No Vault token is stored in GitLab."
+}

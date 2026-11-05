@@ -1,13 +1,15 @@
 {
   "production_api": "https://api.downops.win",
-  "api_version": "1",
+  "api_version": "2",
+  "development_api": "https://wallettracker-dev.int.downops.win",
+  "production_runtime_api_version": "1",
   "readiness_path": "/api/v1/ready",
   "backend_repository": "downops/wallet-tracker-backend",
   "backend_runtime": "Kubernetes + ArgoCD + VSO",
   "android_gitlab_repository": "downops/wallet-tracker-android",
   "android_github_mirror": "noelnovo/WalletTracker",
   "preserve_existing_account_and_tenant_crypto": true,
-  "signing_source": "downops/apps/wallettracker/signing",
+  "embedded_shared_secret": false,
   "release_configuration_source": "downops/apps/wallettracker/mobile",
   "apk_publication_requires_separate_release": true
 }

@@ -17,12 +17,8 @@ class DatabaseHelper(context: Context?) :
         db.execSQL(CREATE_TABLE_IMPORTE)
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        db.execSQL("DROP TABLE IF EXISTS " + TABLE_IMPORTE)
-        db.execSQL("DROP TABLE IF EXISTS " + TABLE_EXPENSE)
-        db.execSQL("DROP TABLE IF EXISTS " + TABLE_SEASON)
-        db.execSQL("DROP TABLE IF EXISTS " + TABLE_EXPENSE_CATEGORY)
-        db.execSQL("DROP TABLE IF EXISTS " + TABLE_SESSION)
-        onCreate(db)
+        // Never destroy a user's unsynchronized finances as an upgrade fallback.
+        error("Legacy database migration requires an explicit migration path ($oldVersion -> $newVersion)")
     }
     companion object {
         private const val DATABASE_NAME = "walletTracker.db"

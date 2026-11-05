@@ -7,7 +7,6 @@ interface ImporteRepository {
     suspend fun getBySeasonId(seasonId: Long): AppResult<List<Importe>>
     suspend fun getById(importeId: Long): AppResult<Importe?>
     suspend fun create(importe: Importe): AppResult<Importe?>
-    suspend fun createAll(importes: List<Importe>): AppResult<Unit>
     suspend fun deleteById(importeId: Long): AppResult<Unit>
     suspend fun deleteBySeasonId(seasonId: Long): AppResult<Unit>
 }

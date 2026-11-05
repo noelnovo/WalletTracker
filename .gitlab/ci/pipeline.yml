@@ -1,0 +1,34 @@
+stages: [test, build]
+
+contract:
+  stage: test
+  image: python:3.13-alpine
+  script:
+    - python3 delivery/verify_contract.py
+
+dev-apk:
+  stage: build
+  image: eclipse-temurin:21-jdk
+  id_tokens:
+    VAULT_ID_TOKEN:
+      aud: https://vault.int.downops.win
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "dev"'
+  variables:
+    ANDROID_HOME: "$CI_PROJECT_DIR/.android-sdk"
+    GRADLE_USER_HOME: "$CI_PROJECT_DIR/.gradle-ci"
+  cache:
+    key: android-dev-toolchain
+    paths: [.android-sdk/, .gradle-ci/caches/, .gradle-ci/wrapper/]
+  before_script:
+    - apt-get update && apt-get install -y --no-install-recommends unzip wget python3
+    - mkdir -p "$ANDROID_HOME/cmdline-tools"
+    - if [ ! -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then wget -q https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip -O sdk.zip; unzip -q sdk.zip -d "$ANDROID_HOME/cmdline-tools"; mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest"; fi
+    - yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || test -f "$ANDROID_HOME/licenses/android-sdk-license"
+    - '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "platforms;android-36" "build-tools;36.0.0"'
+  script:
+    - python3 delivery/build_dev.py
+  artifacts:
+    name: wallettracker-dev-$CI_COMMIT_SHORT_SHA
+    paths: [app/build/outputs/apk/debug/*.apk, app/build/reports/tests/]
+    expire_in: 14 days

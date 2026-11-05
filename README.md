@@ -1,5 +1,10 @@
 # Wallet Tracker
 
+> **Dev is now the WalletTracker3/API-v2 refactor.** See
+> [the dev architecture, security boundaries, sync behavior and Vault signing plan](delivery/DEV-REFACTOR.md).
+> The historical v1 overview below is retained for migration context; the new
+> launcher has no file import or hybrid-encrypted API protocol. GitLab CI owns dev APKs.
+
 An Android expense tracking app built in Kotlin with end-to-end encryption, biometric authentication, and a fully automated CI/CD pipeline.
 
 ## Features
