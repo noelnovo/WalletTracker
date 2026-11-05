@@ -1,9 +1,13 @@
 {
   "status": "owner-provisioned-only; not applied by this task",
-  "kv_mount": "wallettracker",
-  "kv_v2_path": "dev/android-signing",
-  "required_keys": ["KEYSTORE_BASE64", "KEYSTORE_PASSWORD", "KEY_ALIAS", "KEY_PASSWORD"],
-  "policy": "path \"wallettracker/data/dev/android-signing\" { capabilities = [\"read\"] }",
+  "kv_mount": "downops",
+  "kv_v2_path": "apps/wallettracker/dev/mobile",
+  "required_keys": ["KEYSTORE_BASE64", "KEYSTORE_PASSWORD", "KEY_ALIAS"],
+  "optional_keys": {"KEY_PASSWORD": "Only needed when different from KEYSTORE_PASSWORD; otherwise use the store password in memory, without duplicating a Vault field."},
+  "production_record_preserved": "downops/apps/wallettracker/mobile",
+  "legacy_signing_record": "downops/apps/wallettracker/signing contains SIGN_SECRET_WORD for backend API-v1, not the APK keystore.",
+  "separation": "Use an independent development keystore. Never copy the production APK private key into the dev record or grant dev CI access to it.",
+  "policy": "path \"downops/data/apps/wallettracker/dev/mobile\" { capabilities = [\"read\"] }",
   "auth_mount": "gitlab-ci",
   "role": "wallettracker-android-ci-dev",
   "role_settings": {

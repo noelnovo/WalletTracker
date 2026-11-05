@@ -95,15 +95,21 @@ to bypass a signature mismatch; its unsynced data would be lost.
 
 For stable CI signing, the owner must provision **a separate development key**:
 
-- Vault KV-v2 mount: `wallettracker`
-- Secret path: `dev/android-signing`
-- Keys: `KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`
+- Vault KV-v2 mount: `downops` (reuse the existing app namespace, no new engine)
+- Secret path: `apps/wallettracker/dev/mobile`
+- Required keys: `KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`
+- Optional `KEY_PASSWORD` only if different from the store password; otherwise
+  the build reuses the store password in memory, not as a duplicated Vault field.
 - OIDC role/policy: `wallettracker-android-ci-dev`, exact project31/dev claims
   and read-only access to that one record. Full non-secret plan:
   `delivery/dev-signing-vault-plan.json`.
 - Then set project31 variable `DEV_SIGNING_READY=true`.
 
 Do not copy the production APK signing key or backend identity into this record.
+`downops/apps/wallettracker/mobile` is the existing production APK record;
+`downops/apps/wallettracker/signing` is the legacy backend `SIGN_SECRET_WORD`,
+not an Android keystore. The earlier proposed `wallettracker/dev/android-signing`
+path was never provisioned by this task and must not be created.
 No Vault records, policies or roles were written by this implementation. The API
 uses the existing dev server RSA identity; no new API runtime secret is required.
 

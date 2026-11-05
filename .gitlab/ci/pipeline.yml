@@ -8,6 +8,7 @@ contract:
   image: python:3.13-alpine
   script:
     - python3 delivery/verify_contract.py
+    - python3 -m unittest discover -s delivery -p 'test_*.py'
 
 dev-apk:
   resource_group: wallettracker-android-dev

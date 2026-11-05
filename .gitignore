@@ -46,3 +46,4 @@ google-services.json
 .dev-signing-*/
 .android-sdk/
 .gradle-ci/
+__pycache__/
