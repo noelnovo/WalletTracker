@@ -29,6 +29,9 @@ android {
         buildConfig = true
         viewBinding = true
     }
+    testOptions {
+        unitTests.all { it.maxHeapSize = "128m" }
+    }
 
     val devKeyFile = System.getenv("DEV_KEYSTORE_FILE")
     if (!devKeyFile.isNullOrBlank()) {
