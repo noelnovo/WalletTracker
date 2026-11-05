@@ -1,5 +1,8 @@
 stages: [test, build]
 
+default:
+  interruptible: true
+
 contract:
   stage: test
   image: python:3.13-alpine
@@ -7,6 +10,7 @@ contract:
     - python3 delivery/verify_contract.py
 
 dev-apk:
+  resource_group: wallettracker-android-dev
   stage: build
   image: eclipse-temurin:21-jdk
   id_tokens:

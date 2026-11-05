@@ -46,7 +46,7 @@ def main():
             print('Building a stable dev-signed artifact from the scoped Vault record', flush=True)
         else:
             print('DEV_SIGNING_READY=false: disposable debug signing; not an update-stable release', flush=True)
-        subprocess.run(['sh', 'gradlew', '--no-daemon', 'testDebugUnitTest', 'assembleDebug'], cwd=ROOT, env=env, check=True)
+        subprocess.run(['sh', 'gradlew', '--no-daemon', '--max-workers=2', '-Pkotlin.compiler.execution.strategy=in-process', 'testDebugUnitTest', 'assembleDebug'], cwd=ROOT, env=env, check=True)
     finally:
         if directory:
             shutil.rmtree(directory)
