@@ -1,5 +1,6 @@
 {
-  "status": "owner-provisioned-only; not applied by this task",
+  "status": "dev signing record and read-only policy staged and validated by DownOps; JWT role creation blocked by HTTP403; CI signing remains disabled",
+  "staging_receipt": "WalletTrackerBackend/delivery/vault-dev-staging-receipt.json",
   "kv_mount": "downops",
   "kv_v2_path": "apps/wallettracker/dev/mobile",
   "required_keys": ["KEYSTORE_BASE64", "KEYSTORE_PASSWORD", "KEY_ALIAS"],

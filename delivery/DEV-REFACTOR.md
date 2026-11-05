@@ -93,7 +93,8 @@ debug certificate. CI defaults to an ephemeral debug certificate, which is **not
 update-stable across runners**. Never uninstall an existing dev wallet merely
 to bypass a signature mismatch; its unsynced data would be lost.
 
-For stable CI signing, the owner must provision **a separate development key**:
+DownOps has staged and validated **a separate development key** and its read-only
+policy. JWT role creation is still blocked by HTTP403. The intended record is:
 
 - Vault KV-v2 mount: `downops` (reuse the existing app namespace, no new engine)
 - Secret path: `apps/wallettracker/dev/mobile`
@@ -103,15 +104,20 @@ For stable CI signing, the owner must provision **a separate development key**:
 - OIDC role/policy: `wallettracker-android-ci-dev`, exact project31/dev claims
   and read-only access to that one record. Full non-secret plan:
   `delivery/dev-signing-vault-plan.json`.
-- Then set project31 variable `DEV_SIGNING_READY=true`.
+- Do not set project31 `DEV_SIGNING_READY=true` until the JWT role is verified
+  and a data-safe installed-signer transition is approved.
 
 Do not copy the production APK signing key or backend identity into this record.
 `downops/apps/wallettracker/prod/mobile` is the owner-specified production APK record;
 `downops/apps/wallettracker/prod/signing` is the legacy backend `SIGN_SECRET_WORD`,
 not an Android keystore. The earlier proposed `wallettracker/dev/android-signing`
 path was never provisioned by this task and must not be created.
-No Vault records, policies or roles were written by this implementation. The API
-uses the existing dev server RSA identity; no new API runtime secret is required.
+DownOps verified unchanged-value staging of existing backend/delivery records,
+created the independent dev APK key and updated only dev read policies. Old
+sources/grants and production/global readers are retained until their approved
+cutovers. The API keeps the same dev server RSA identity and DB password;
+no API credential rotation is performed. The protected staging summary is in
+the backend repository at `delivery/vault-dev-staging-receipt.json`.
 
 ## Verification
 
