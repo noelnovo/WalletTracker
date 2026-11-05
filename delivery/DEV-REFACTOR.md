@@ -62,8 +62,9 @@ are AES-256-GCM sealed with account/record-bound associated data and device
 Keystore keys (StrongBox where supported, otherwise device Keystore).
 
 Backups/device transfer, cleartext HTTP, redirect-following and sensitive screen
-capture are disabled. Leaving the activity locks the wallet after any in-flight
-sync completes. Passwords are never trimmed before submission. A compromised
+capture are disabled. Leaving the activity immediately locks its UI and dismisses
+sensitive dialogs; an in-flight sync finishes before the database closes.
+Passwords are never trimmed before submission. A compromised
 OS/process can still abuse an unlocked session, observe input or read runtime
 plaintext; Keystore cannot make that threat impossible. Debug APKs are
 debuggable test software, not production anti-tamper builds.
@@ -81,6 +82,12 @@ not done during dev-only work. GitHub automatic Android builds are disabled;
 its old release workflow remains manual and main-only.
 
 Dev artifacts use `win.downops.wallettracker.debug` and the private dev hostname.
+The shared native runner has only2GB RAM and cannot safely overlap Android
+compilation with backend image/security work. The GitLab APK job is manual
+until the owner sets `ANDROID_CI_CAPACITY_READY=true` after providing adequate
+capacity or scheduling isolation. Contract checks still run automatically.
+Builds are capped at one worker,768MB heap and384MB metaspace; JVM tests use
+128MB. This work does not resize/restart the shared runner or alter other repos.
 They do not replace the installed production package. Local builds use the local
 debug certificate. CI defaults to an ephemeral debug certificate, which is **not
 update-stable across runners**. Never uninstall an existing dev wallet merely

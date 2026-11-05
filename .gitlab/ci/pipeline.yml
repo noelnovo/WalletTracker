@@ -17,7 +17,10 @@ dev-apk:
     VAULT_ID_TOKEN:
       aud: https://vault.int.downops.win
   rules:
+    - if: '$CI_COMMIT_BRANCH == "dev" && $ANDROID_CI_CAPACITY_READY == "true"'
     - if: '$CI_COMMIT_BRANCH == "dev"'
+      when: manual
+      allow_failure: true
   variables:
     ANDROID_HOME: "$CI_PROJECT_DIR/.android-sdk"
     GRADLE_USER_HOME: "$CI_PROJECT_DIR/.gradle-ci"

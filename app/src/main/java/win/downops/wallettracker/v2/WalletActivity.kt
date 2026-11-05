@@ -18,7 +18,6 @@ import android.view.WindowManager
 import android.widget.ArrayAdapter
 import android.widget.LinearLayout
 import android.widget.ScrollView
-import android.widget.Spinner
 import android.widget.TextView
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
@@ -67,6 +66,8 @@ class WalletActivity : AppCompatActivity() {
     private var networkRegistered = false
     private var visibleRows = emptyList<JSONObject>()
     private var categoryNames = emptyMap<String, String>()
+    private val activeDialogs = mutableSetOf<androidx.appcompat.app.AlertDialog>()
+    private var activeSnackbar: Snackbar? = null
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) { runOnUiThread { model.syncSoon() } }
     }
@@ -98,7 +99,15 @@ class WalletActivity : AppCompatActivity() {
 
     override fun onSaveInstanceState(outState: Bundle) { outState.putInt("screen", screen); super.onSaveInstanceState(outState) }
     override fun onStop() {
-        if (!isChangingConfigurations && model.unlocked) { showingLogin = false; model.lock() }
+        if (!isChangingConfigurations) {
+            activeSnackbar?.dismiss(); activeSnackbar = null
+            activeDialogs.toList().forEach { it.dismiss() }
+            (supportFragmentManager.findFragmentByTag("wallet-date") as? androidx.fragment.app.DialogFragment)?.dismissAllowingStateLoss()
+            if (model.unlocked) {
+                showingLogin = false; visibleRows = emptyList(); categoryNames = emptyMap()
+                root.removeAllViews(); model.lock()
+            }
+        }
         super.onStop()
     }
     override fun onDestroy() {
@@ -122,13 +131,36 @@ class WalletActivity : AppCompatActivity() {
         parent.addView(box, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) })
         return field
     }
-    private fun message(value: String) { Snackbar.make(root, value, Snackbar.LENGTH_LONG).show() }
+    private fun dropdown(parent: LinearLayout, hint: String, choices: List<String>, selected: String?): MaterialAutoCompleteTextView {
+        val box = TextInputLayout(this).apply {
+            this.hint = hint; boxBackgroundMode = TextInputLayout.BOX_BACKGROUND_OUTLINE
+            endIconMode = TextInputLayout.END_ICON_DROPDOWN_MENU
+        }
+        val field = MaterialAutoCompleteTextView(box.context).apply {
+            inputType = InputType.TYPE_NULL; minHeight = dp(56); maxLines = 1
+            setAdapter(ArrayAdapter(this@WalletActivity, android.R.layout.simple_list_item_1, choices))
+            setText(selected ?: choices.firstOrNull().orEmpty(), false)
+        }
+        box.addView(field)
+        parent.addView(box, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) })
+        return field
+    }
+    private fun displaySnackbar(snackbar: Snackbar) {
+        activeSnackbar?.dismiss(); activeSnackbar = snackbar; snackbar.show()
+    }
+    private fun message(value: String) { displaySnackbar(Snackbar.make(root, value, Snackbar.LENGTH_LONG)) }
+    private fun showDialog(dialog: androidx.appcompat.app.AlertDialog) {
+        activeDialogs.add(dialog)
+        dialog.setOnDismissListener { activeDialogs.remove(dialog) }
+        dialog.show()
+    }
     private fun task(block: suspend () -> Unit) {
         lifecycleScope.launch { try { block() } catch (error: Exception) { message(error.message ?: "Unable to finish. Your local data is retained.") } }
     }
 
     private fun render() {
         if (!model.unlocked) {
+            activeSnackbar?.dismiss(); activeSnackbar = null
             visibleRows = emptyList(); categoryNames = emptyMap()
             if (!showingLogin) login()
             return
@@ -209,7 +241,7 @@ class WalletActivity : AppCompatActivity() {
         body.addView(button("Local wallet", false) {
             MaterialAlertDialogBuilder(this).setTitle("Local wallet")
                 .setMessage("Only on this phone. No account or sync.")
-                .setNegativeButton("Cancel", null).setPositiveButton("Open") { _, _ -> model.localOnly(); render() }.show()
+                .setNegativeButton("Cancel", null).setPositiveButton("Open") { _, _ -> task { model.localOnly(); render() } }.create().let(::showDialog)
         })
     }
 
@@ -310,10 +342,10 @@ class WalletActivity : AppCompatActivity() {
             if (index == rows.size) categoryEditor(null)
             else if (rows[index].optBoolean("has_conflict")) conflict(rows[index])
             else categoryEditor(rows[index])
-        }.setNegativeButton("Done", null).show()
+        }.setNegativeButton("Done", null).create().let(::showDialog)
     }
 
-    private fun categoryEditor(row: JSONObject?) {
+    private fun categoryEditor(row: JSONObject?, onSaved: (() -> Unit)? = null) {
         val body = column(); val name = input(body, "Category name").apply { setText(row?.getJSONObject("payload")?.optString("name")) }
         val dialog = MaterialAlertDialogBuilder(this).setTitle(if (row == null) "New category" else "Edit category").setView(body)
             .setNegativeButton("Cancel", null).setPositiveButton("Save", null)
@@ -323,13 +355,13 @@ class WalletActivity : AppCompatActivity() {
             } }.create()
         dialog.setOnShowListener { dialog.getButton(-1).setOnClickListener {
             if (name.text.isNullOrBlank() || name.text!!.length > 80) name.error = "Enter 1–80 characters"
-            else { model.store!!.save("category", JSONObject().put("name", name.text.toString().trim()), row); model.changed(); render(); dialog.dismiss() }
-        } }; dialog.show()
+            else { model.store!!.save("category", JSONObject().put("name", name.text.toString().trim()), row); model.changed(); render(); dialog.dismiss(); onSaved?.invoke() }
+        } }; showDialog(dialog)
     }
 
     private fun editor(kind: String, row: JSONObject? = null) {
         val categories = categoryRows()
-        if (kind == "expense" && categories.isEmpty()) { categoryEditor(null); return }
+        if (kind == "expense" && categories.isEmpty()) { categoryEditor(null) { editor(kind, row) }; return }
         val old = row?.getJSONObject("payload")
         val body = column()
         val description = input(body, if (kind == "bill") "Restaurant" else "Description").apply { setText(old?.optString("description")) }
@@ -373,20 +405,21 @@ class WalletActivity : AppCompatActivity() {
         metadata.addView(dateBox, LinearLayout.LayoutParams(0, -2, 1.4f))
         metadata.addView(currencyBox, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(12) })
         body.addView(metadata, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) })
-        val category = Spinner(this).apply { adapter = ArrayAdapter(this@WalletActivity, android.R.layout.simple_spinner_dropdown_item, categories.map { it.getJSONObject("payload").getString("name") }) }
-        if (kind == "expense") { body.addView(category); category.setSelection(categories.indexOfFirst { it.getString("id") == old?.optString("category_id") }.coerceAtLeast(0)) }
+        var selectedCategory = categories.firstOrNull { it.getString("id") == old?.optString("category_id") } ?: categories.firstOrNull()
+        if (kind == "expense") dropdown(body, "Category", categories.map { it.getJSONObject("payload").getString("name") }, selectedCategory?.getJSONObject("payload")?.getString("name")).apply {
+            setOnItemClickListener { _, _, index, _ -> selectedCategory = categories[index] }
+        }
         val participants = if (kind == "bill") input(body, "People").apply {
             (parent.parent as? TextInputLayout)?.placeholderText = "Alex, Sam, …"
             setText(old?.optJSONArray("participants")?.let { array -> (0 until array.length()).joinToString(", ") { array.getString(it) } })
         } else null
-        val paidBy = if (kind == "bill") Spinner(this) else null
+        val paidBy = if (kind == "bill") dropdown(body, "Paid by", emptyList(), old?.optString("paid_by")) else null
         if (paidBy != null) {
-            body.addView(text("Paid by", 12f, muted)); body.addView(paidBy)
             fun updatePayers() {
-                val selected = paidBy.selectedItem?.toString() ?: old?.optString("paid_by")
+                val selected = paidBy.text.toString().ifEmpty { old?.optString("paid_by").orEmpty() }
                 val people = participants!!.text.toString().split(',').map(String::trim).filter(String::isNotBlank)
-                paidBy.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, people)
-                paidBy.setSelection(people.indexOf(selected).coerceAtLeast(0))
+                paidBy.setAdapter(ArrayAdapter(this, android.R.layout.simple_list_item_1, people))
+                paidBy.setText(selected.takeIf { it in people } ?: people.firstOrNull().orEmpty(), false)
             }
             participants!!.addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
@@ -405,17 +438,17 @@ class WalletActivity : AppCompatActivity() {
                 val day = selectedDay; val parser = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { isLenient = false }
                 require(day.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) && parser.format(requireNotNull(parser.parse(day))) == day) { "Enter a valid YYYY-MM-DD date" }
                 val payload = JSONObject().put("description", note).put("amount_minor", minor).put("currency", currency.text.toString()).put("date", day)
-                if (kind == "expense") payload.put("category_id", categories[category.selectedItemPosition].getString("id"))
+                if (kind == "expense") payload.put("category_id", requireNotNull(selectedCategory).getString("id"))
                 else {
                     val people = participants!!.text.toString().split(',').map { it.trim() }
                     require(people.size in 2..100 && people.all { it.isNotBlank() && it.length <= 80 } && people.distinct().size == people.size) { "Enter 2–100 unique people" }
-                    val payer = paidBy!!.selectedItem?.toString().orEmpty(); require(payer in people) { "Choose who paid" }
+                    val payer = paidBy!!.text.toString(); require(payer in people) { "Choose who paid" }
                     val shares = JSONArray(); people.forEachIndexed { index, person -> shares.put(JSONObject().put("name", person).put("amount_minor", minor / people.size + if (index < minor % people.size) 1 else 0)) }
                     payload.put("participants", JSONArray(people)).put("paid_by", payer).put("shares", shares)
                 }
                 model.store!!.save(kind, payload, row); model.changed(); render(); dialog.dismiss()
             } catch (error: Exception) { message(error.message ?: "Check the form") }
-        } }; dialog.show()
+        } }; showDialog(dialog)
     }
 
     private fun stageDelete(row: JSONObject) {
@@ -424,10 +457,11 @@ class WalletActivity : AppCompatActivity() {
         store.save(row.getString("kind"), row.getJSONObject("payload"), row, deleted = true, delay = 6500)
         render()
         Snackbar.make(root, "Deleted", 6000).setAction("Undo") {
+            if (!model.unlocked || model.store !== store) return@setAction
             val latest = store.rows(true).first { it.getString("id") == row.getString("id") }
             store.save(row.getString("kind"), row.getJSONObject("payload"), latest)
             model.changed(); render()
-        }.show()
+        }.let(::displaySnackbar)
         model.syncSoon(6700)
     }
 
@@ -445,7 +479,7 @@ class WalletActivity : AppCompatActivity() {
             body.addView(line)
         }
         MaterialAlertDialogBuilder(this).setTitle(payload.getString("description")).setView(body)
-            .setNegativeButton("Done", null).setPositiveButton("Edit") { _, _ -> editor("bill", row) }.show()
+            .setNegativeButton("Done", null).setPositiveButton("Edit") { _, _ -> editor("bill", row) }.create().let(::showDialog)
     }
 
     private fun conflict(row: JSONObject) {
@@ -472,7 +506,7 @@ class WalletActivity : AppCompatActivity() {
         MaterialAlertDialogBuilder(this).setTitle("Keep which version?").setView(ScrollView(this).apply { addView(body) })
             .setNegativeButton("Later", null)
             .setNeutralButton("Use online") { _, _ -> model.store!!.resolve(row, false); model.changed(); render() }
-            .setPositiveButton("Keep local") { _, _ -> model.store!!.resolve(row, true); model.changed(); render() }.show()
+            .setPositiveButton("Keep local") { _, _ -> model.store!!.resolve(row, true); model.changed(); render() }.create().let(::showDialog)
     }
 
     private fun settings() {
@@ -490,7 +524,7 @@ class WalletActivity : AppCompatActivity() {
                 .setMessage(if (model.store!!.pendingCount() > 0) "${model.store!!.pendingCount()} changes stay on this phone." else "Remove this device's session?")
                 .setNegativeButton("Cancel", null).setPositiveButton("Log out") { _, _ -> task {
                     try { model.logout() } finally { showingLogin = false; render() }
-                } }.show()
+                } }.create().let(::showDialog)
         })
         body.addView(button("Reset wallet…", false) {
             MaterialAlertDialogBuilder(this).setTitle("Delete all expenses and bills?")
@@ -502,16 +536,17 @@ class WalletActivity : AppCompatActivity() {
                     records.forEach { store.save(it.getString("kind"), it.getJSONObject("payload"), it, deleted = true, delay = 6500) }
                     render()
                     Snackbar.make(root, "${records.size} deleted", 6000).setAction("Undo") {
+                        if (!model.unlocked || model.store !== store) return@setAction
                         records.forEach { old -> val latest = store.rows(true).first { it.getString("id") == old.getString("id") }; store.save(old.getString("kind"), old.getJSONObject("payload"), latest) }
                         model.changed(); render()
-                    }.show()
+                    }.let(::displaySnackbar)
                     model.syncSoon(6700)
-                }.show()
+                }.create().let(::showDialog)
         }.apply { setTextColor(com.google.android.material.color.MaterialColors.getColor(this@WalletActivity, androidx.appcompat.R.attr.colorError, Color.RED)); setIconResource(android.R.drawable.ic_menu_delete) })
         body.addView(button("About · ${BuildConfig.VERSION_NAME}", false) {
             MaterialAlertDialogBuilder(this).setTitle("Wallet")
                 .setMessage("${BuildConfig.API_BASE_URL}\n\nEncrypted on this device. Sync resumes when unlocked.")
-                .setPositiveButton("Done", null).show()
+                .setPositiveButton("Done", null).create().let(::showDialog)
         })
     }
 }

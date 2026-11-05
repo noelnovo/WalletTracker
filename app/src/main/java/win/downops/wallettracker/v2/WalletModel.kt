@@ -20,6 +20,7 @@ class WalletModel(application: Application) : AndroidViewModel(application) {
     private var access: String? = null
     private var refresh: String? = null
     private var expiry = 0L
+    private var locked = true
     var account: String? = null; private set
     var store: FinanceStore? = null; private set
     val changes = MutableStateFlow(0)
@@ -27,7 +28,7 @@ class WalletModel(application: Application) : AndroidViewModel(application) {
     val savedAccount get() = prefs.getString("account", null)
     val savedName get() = prefs.getString("username", "") ?: ""
     val wrappedRefresh get() = prefs.getString("refresh", null)
-    val unlocked get() = store != null
+    val unlocked get() = !locked && store != null
 
     init {
         viewModelScope.launch {
@@ -39,8 +40,12 @@ class WalletModel(application: Application) : AndroidViewModel(application) {
         val result = api.call("login", JSONObject().put("username", username).put("password", password))
         val id = result.getString("user_id")
         prefs.edit().putString("username", username).apply()
-        openAccount(id)
-        acceptTokens(result, remember)
+        mutex.withLock {
+            // Password reauthentication replaces enrollment-invalidated wrapping keys.
+            savedAccount?.let { DeviceVault(getApplication(), it).forgetLogin() }
+            DeviceVault(getApplication(), id).forgetLogin()
+            openAccount(id); acceptTokens(result, remember)
+        }
         sync()
     }
 
@@ -53,20 +58,18 @@ class WalletModel(application: Application) : AndroidViewModel(application) {
         account = id
         // Bind cached data to both the server environment and authenticated user ID.
         store = FinanceStore(getApplication(), "${win.downops.wallettracker.BuildConfig.API_BASE_URL}:$id")
+        locked = false
         changes.value++
     }
 
     suspend fun unlock(id: String, rawRefresh: String) {
-        openAccount(id)
-        refresh = rawRefresh
-        access = null
+        mutex.withLock { openAccount(id); refresh = rawRefresh; access = null }
         status.value = "Offline"
         sync()
     }
 
-    fun localOnly() {
-        openAccount("local")
-        refresh = null; access = null
+    suspend fun localOnly() {
+        mutex.withLock { openAccount("local"); refresh = null; access = null }
         status.value = "On this device"
     }
 
@@ -87,29 +90,34 @@ class WalletModel(application: Application) : AndroidViewModel(application) {
 
     suspend fun sync() = mutex.withLock {
         val local = store ?: return@withLock
+        if (!unlocked) return@withLock
         if (account == "local" || refresh == null) return@withLock
         try {
             status.value = "Syncing…"
             if (access == null || System.currentTimeMillis() >= expiry) {
                 acceptTokens(api.call("refresh", JSONObject().put("refresh_token", refresh)))
             }
+            if (!unlocked) return@withLock
             withContext(Dispatchers.IO) {
                 // Send first so our own acknowledged writes are not reported as conflicts.
                 var operations = local.pending()
-                while (operations.length() > 0) {
+                while (operations.length() > 0 && unlocked) {
                     val result = api.call("sync", JSONObject().put("operations", operations), access)
                     local.acknowledge(operations, result.getJSONArray("results"))
                     operations = local.pending()
                 }
+                if (!unlocked) return@withContext
                 do {
                     val page = api.call("sync?cursor=${local.cursor()}&limit=100", token=access)
                     local.applyPage(page)
-                } while (page.getBoolean("has_more"))
+                } while (page.getBoolean("has_more") && unlocked)
             }
+            if (!unlocked) return@withLock
             val conflicts = local.rows(true).count { it.optBoolean("has_conflict") }
             status.value = if (conflicts > 0) "Review ($conflicts)" else if (local.pendingCount() > 0) "Pending" else "Synced"
             changes.value++
         } catch (error: IOException) {
+            if (!unlocked) return@withLock
             status.value = if (error is ApiFailure) {
                 if (error.status == 401) "Sign in again" else error.message ?: "Sync failed"
             } else "Offline"
@@ -134,9 +142,14 @@ class WalletModel(application: Application) : AndroidViewModel(application) {
         clearMemory()
     }
 
-    fun lock() { viewModelScope.launch { mutex.withLock { clearMemory() } } }
+    fun lock() {
+        locked = true
+        changes.value++
+        viewModelScope.launch { mutex.withLock { clearMemory() } }
+    }
 
     private fun clearMemory() {
+        locked = true
         access = null; refresh = null; expiry = 0
         store?.close(); store = null; account = null
         changes.value++
