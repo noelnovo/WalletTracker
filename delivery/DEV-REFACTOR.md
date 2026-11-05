@@ -13,7 +13,9 @@ UI rule: short labels, one primary action per view, compact rows and icon-led
 affordances. No marketing copy or instructional paragraphs. Dates use a picker;
 bill payers are selected from entered people; shares have a dedicated detail
 view. Conflicts compare readable cards, not JSON. Only destructive decisions
-get a brief confirmation; technical details live behind About.
+get a brief confirmation; technical details live behind About. Fingerprint is
+an icon-only accessible toggle. Date/currency use aligned outlined fields with
+a calendar end icon, localized date display and the Material calendar dialog.
 
 `WalletModel` owns authenticated state and synchronization, `FinanceApi` owns
 HTTPS transport, `FinanceStore` owns durable local records/outbox/conflicts, and

@@ -85,6 +85,23 @@ class FinanceStoreTest {
         try { vault.open(encrypted, "record:B"); fail("Wrong AAD must fail") } catch (_: javax.crypto.AEADBadTagException) { }
     }
 
+    @Test fun acknowledgementDoesNotShortenAnActiveUndoWindow() {
+        val store = store()
+        val original = store.save("category", JSONObject().put("name", "Food"))
+        val sent = store.pending()
+        store.save("category", original.getJSONObject("payload"), original, deleted = true, delay = 6000)
+        val remote = JSONObject(original.toString()).put("version", 1).put("revision", 1)
+        val result = JSONObject().put("operation_id", sent.getJSONObject(0).getString("operation_id"))
+            .put("status", "applied").put("record", remote)
+        store.acknowledge(sent, JSONArray().put(result))
+        assertEquals(0, store.pending().length())
+        val deleted = store.rows(true).single()
+        assertTrue(deleted.getBoolean("deleted"))
+        store.save("category", original.getJSONObject("payload"), deleted)
+        assertEquals(1, store.pending().getJSONObject(0).getInt("base_version"))
+        store.close()
+    }
+
     @Test fun refreshCanBeWrappedButNotUnwrappedWithoutFingerprint() {
         org.junit.Assume.assumeTrue(androidx.biometric.BiometricManager.from(context).canAuthenticate(
             androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG) == androidx.biometric.BiometricManager.BIOMETRIC_SUCCESS)

@@ -77,7 +77,10 @@ class FinanceStore(context: Context, account: String) : SQLiteOpenHelper(context
                 if (current != null && current.getString("operation_id") != operation.getString("operation_id")) {
                     // A UI edit raced the request: keep it and rebase on our acknowledged write.
                     val local = rows(true).first { it.getString("id") == id }.put("version", remote.getInt("version"))
-                    putPending(local)
+                    val remainingUndo = readableDatabase.rawQuery("SELECT not_before FROM records WHERE id=?", arrayOf(id)).use {
+                        if (it.moveToFirst()) (it.getLong(0) - System.currentTimeMillis()).coerceAtLeast(0) else 0
+                    }
+                    putPending(local, remainingUndo)
                 } else putRemote(remote)
             }
         }

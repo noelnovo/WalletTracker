@@ -1,6 +1,7 @@
 package win.downops.wallettracker.v2
 
 import android.content.Context
+import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Canvas
 import android.graphics.Paint
@@ -35,21 +36,25 @@ import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
-import com.google.android.material.checkbox.MaterialCheckBox
+import com.google.android.material.datepicker.MaterialDatePicker
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.snackbar.Snackbar
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
+import com.google.android.material.textfield.MaterialAutoCompleteTextView
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 import win.downops.wallettracker.BuildConfig
+import win.downops.wallettracker.R
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.text.NumberFormat
 import java.text.SimpleDateFormat
+import java.text.DateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 import javax.crypto.Cipher
 
 /** Material 3 shell. Data, transport, crypto and sync are deliberately outside the view. */
@@ -60,6 +65,8 @@ class WalletActivity : AppCompatActivity() {
     private var screen = 1
     private var showingLogin = false
     private var networkRegistered = false
+    private var visibleRows = emptyList<JSONObject>()
+    private var categoryNames = emptyMap<String, String>()
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) { runOnUiThread { model.syncSoon() } }
     }
@@ -121,8 +128,15 @@ class WalletActivity : AppCompatActivity() {
     }
 
     private fun render() {
-        if (!model.unlocked) { if (!showingLogin) login(); return }
+        if (!model.unlocked) {
+            visibleRows = emptyList(); categoryNames = emptyMap()
+            if (!showingLogin) login()
+            return
+        }
         showingLogin = false
+        visibleRows = model.store!!.rows()
+        categoryNames = visibleRows.filter { it.getString("kind") == "category" }
+            .associate { it.getString("id") to it.getJSONObject("payload").getString("name") }
         root.removeAllViews()
         val header = column()
         if (BuildConfig.DEBUG) header.addView(text("DEV", 11f, primary))
@@ -154,8 +168,22 @@ class WalletActivity : AppCompatActivity() {
         val username = input(body, "Username").apply { setText(model.savedName) }
         val password = input(body, "Password", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD)
         val biometricAvailable = BiometricManager.from(this).canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG) == BiometricManager.BIOMETRIC_SUCCESS
-        val remember = MaterialCheckBox(this).apply { text = "Fingerprint unlock"; isChecked = biometricAvailable; isEnabled = biometricAvailable }
-        body.addView(remember)
+        val remember = MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+            setIconResource(R.drawable.ic_fingerprint); iconSize = dp(26); iconPadding = 0
+            iconGravity = MaterialButton.ICON_GRAVITY_TEXT_START; gravity = Gravity.CENTER
+            isCheckable = true; isChecked = biometricAvailable; isEnabled = biometricAvailable
+            cornerRadius = dp(16); contentDescription = "Use fingerprint unlock"
+            androidx.appcompat.widget.TooltipCompat.setTooltipText(this, "Fingerprint unlock")
+            setPadding(dp(12), 0, dp(12), 0)
+        }
+        fun updateFingerprintState() {
+            val onPrimary = com.google.android.material.color.MaterialColors.getColor(this, com.google.android.material.R.attr.colorOnPrimary, Color.WHITE)
+            remember.backgroundTintList = ColorStateList.valueOf(if (remember.isChecked) primary else Color.TRANSPARENT)
+            remember.iconTint = ColorStateList.valueOf(if (remember.isChecked) onPrimary else primary)
+            ViewCompat.setStateDescription(remember, if (remember.isChecked) "On" else "Off")
+        }
+        remember.setOnClickListener { updateFingerprintState() }
+        updateFingerprintState()
         lateinit var signIn: MaterialButton
         signIn = button("Sign in") {
             if (username.text.isNullOrBlank() || password.text.isNullOrEmpty()) { message("Enter your username and password"); return@button }
@@ -165,8 +193,11 @@ class WalletActivity : AppCompatActivity() {
                 finally { signIn.isEnabled = true }
             }
         }
-        body.addView(signIn)
-        if (biometricAvailable && model.wrappedRefresh != null) body.addView(button("Unlock", false) { unlock() })
+        val signInActions = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        signInActions.addView(signIn, LinearLayout.LayoutParams(0, -2, 1f))
+        if (biometricAvailable) signInActions.addView(remember, LinearLayout.LayoutParams(dp(56), dp(56)).apply { marginStart = dp(8) })
+        body.addView(signInActions)
+        if (biometricAvailable && model.wrappedRefresh != null) body.addView(button("Unlock", false) { unlock() }.apply { setIconResource(R.drawable.ic_fingerprint) })
         if (BuildConfig.ALLOW_REGISTER) body.addView(button("Create account", false) {
             if (username.text.toString().trim().length !in 3..128) { username.error = "3–128 characters"; return@button }
             if (password.text.toString().length !in 12..1024) { password.error = "12–1024 characters"; return@button }
@@ -209,7 +240,7 @@ class WalletActivity : AppCompatActivity() {
     }.format(BigDecimal.valueOf(minor, 2))
 
     private fun finances(kind: String) {
-        val rows = model.store!!.rows().filter { it.getString("kind") == kind }
+        val rows = visibleRows.filter { it.getString("kind") == kind }
         val totals = rows.groupBy { it.getJSONObject("payload").optString("currency", "EUR") }
             .map { (currency, values) -> money(values.sumOf { it.getJSONObject("payload").optLong("amount_minor") }, currency) }
         val summary = MaterialCardView(this).apply { radius = dp(24).toFloat(); strokeWidth = 0 }
@@ -270,8 +301,8 @@ class WalletActivity : AppCompatActivity() {
         }
     }
 
-    private fun categoryRows() = model.store!!.rows().filter { it.getString("kind") == "category" }
-    private fun categoryName(id: String) = categoryRows().firstOrNull { it.getString("id") == id }?.getJSONObject("payload")?.optString("name") ?: "Uncategorized"
+    private fun categoryRows() = visibleRows.filter { it.getString("kind") == "category" }
+    private fun categoryName(id: String) = categoryNames[id] ?: "Uncategorized"
     private fun categories() {
         val rows = categoryRows()
         val options = rows.map { it.getJSONObject("payload").getString("name") + if (it.optBoolean("has_conflict")) " ⚠" else "" } + "+ Category"
@@ -305,16 +336,43 @@ class WalletActivity : AppCompatActivity() {
         val amount = input(body, "Amount", InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL).apply {
             old?.let { setText(BigDecimal.valueOf(it.getLong("amount_minor"), 2).toPlainString()) }
         }
-        val dateValue = old?.optString("date") ?: SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
-        val date = button(dateValue, false) { }.apply { setIconResource(android.R.drawable.ic_menu_today) }
-        date.setOnClickListener {
-            val parts = date.text.toString().split('-').map(String::toInt)
-            android.app.DatePickerDialog(this, { _, year, month, day -> date.text = String.format(Locale.US, "%04d-%02d-%02d", year, month + 1, day) }, parts[0], parts[1] - 1, parts[2]).show()
+        var selectedDay = old?.optString("date") ?: SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+        val iso = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }
+        val displayDate = DateFormat.getDateInstance(DateFormat.MEDIUM).apply { timeZone = TimeZone.getTimeZone("UTC") }
+        val dateBox = TextInputLayout(this).apply {
+            hint = "Date"; boxBackgroundMode = TextInputLayout.BOX_BACKGROUND_OUTLINE
+            endIconMode = TextInputLayout.END_ICON_CUSTOM; setEndIconDrawable(R.drawable.ic_calendar)
+            endIconContentDescription = "Choose date"
         }
-        val currency = Spinner(this).apply { adapter = ArrayAdapter(this@WalletActivity, android.R.layout.simple_spinner_dropdown_item, listOf("EUR", "USD", "GBP")); setSelection(listOf("EUR", "USD", "GBP").indexOf(old?.optString("currency") ?: "EUR").coerceAtLeast(0)) }
+        val date = TextInputEditText(dateBox.context).apply {
+            setText(displayDate.format(requireNotNull(iso.parse(selectedDay))))
+            inputType = InputType.TYPE_NULL; isFocusable = false; isCursorVisible = false
+            minHeight = dp(56); maxLines = 1
+        }
+        dateBox.addView(date)
+        fun chooseDate() {
+            MaterialDatePicker.Builder.datePicker().setTitleText("Date")
+                .setSelection(requireNotNull(iso.parse(selectedDay)).time).build().apply {
+                    addOnPositiveButtonClickListener { value ->
+                        selectedDay = iso.format(Date(value)); date.setText(displayDate.format(Date(value)))
+                    }
+                }.show(supportFragmentManager, "wallet-date")
+        }
+        date.setOnClickListener { chooseDate() }; dateBox.setEndIconOnClickListener { chooseDate() }
+        val currencyBox = TextInputLayout(this).apply {
+            hint = "Currency"; boxBackgroundMode = TextInputLayout.BOX_BACKGROUND_OUTLINE
+            endIconMode = TextInputLayout.END_ICON_DROPDOWN_MENU
+        }
+        val currency = MaterialAutoCompleteTextView(currencyBox.context).apply {
+            inputType = InputType.TYPE_NULL; minHeight = dp(56); maxLines = 1
+            setAdapter(ArrayAdapter(this@WalletActivity, android.R.layout.simple_list_item_1, listOf("EUR", "USD", "GBP")))
+            setText(old?.optString("currency") ?: "EUR", false)
+        }
+        currencyBox.addView(currency)
         val metadata = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        metadata.addView(date, LinearLayout.LayoutParams(0, -2, 1f)); metadata.addView(currency, LinearLayout.LayoutParams(0, -2, 1f))
-        body.addView(metadata)
+        metadata.addView(dateBox, LinearLayout.LayoutParams(0, -2, 1.4f))
+        metadata.addView(currencyBox, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(12) })
+        body.addView(metadata, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) })
         val category = Spinner(this).apply { adapter = ArrayAdapter(this@WalletActivity, android.R.layout.simple_spinner_dropdown_item, categories.map { it.getJSONObject("payload").getString("name") }) }
         if (kind == "expense") { body.addView(category); category.setSelection(categories.indexOfFirst { it.getString("id") == old?.optString("category_id") }.coerceAtLeast(0)) }
         val participants = if (kind == "bill") input(body, "People").apply {
@@ -344,9 +402,9 @@ class WalletActivity : AppCompatActivity() {
                 val minor = BigDecimal(amount.text.toString().replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.UNNECESSARY).longValueExact()
                 require(minor in 1..99999999999) { "Enter a positive amount with at most two decimals" }
                 val note = description.text.toString().trim(); require(note.isNotEmpty() && note.length <= 255) { "Enter a description up to 255 characters" }
-                val day = date.text.toString(); val parser = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { isLenient = false }
+                val day = selectedDay; val parser = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { isLenient = false }
                 require(day.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) && parser.format(requireNotNull(parser.parse(day))) == day) { "Enter a valid YYYY-MM-DD date" }
-                val payload = JSONObject().put("description", note).put("amount_minor", minor).put("currency", currency.selectedItem.toString()).put("date", day)
+                val payload = JSONObject().put("description", note).put("amount_minor", minor).put("currency", currency.text.toString()).put("date", day)
                 if (kind == "expense") payload.put("category_id", categories[category.selectedItemPosition].getString("id"))
                 else {
                     val people = participants!!.text.toString().split(',').map { it.trim() }
