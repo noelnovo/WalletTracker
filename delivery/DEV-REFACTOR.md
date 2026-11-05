@@ -9,6 +9,12 @@ with binary floating point. Supported currencies are EUR, USD and GBP; totals
 are kept separate (no invented exchange rates). File import, CSV parsing, share
 handlers and the mobile bulk-import API are removed.
 
+UI rule: short labels, one primary action per view, compact rows and icon-led
+affordances. No marketing copy or instructional paragraphs. Dates use a picker;
+bill payers are selected from entered people; shares have a dedicated detail
+view. Conflicts compare readable cards, not JSON. Only destructive decisions
+get a brief confirmation; technical details live behind About.
+
 `WalletModel` owns authenticated state and synchronization, `FinanceApi` owns
 HTTPS transport, `FinanceStore` owns durable local records/outbox/conflicts, and
 `DeviceVault` owns encryption. Old v1 screens/repositories are retained as

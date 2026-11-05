@@ -23,7 +23,7 @@ class WalletModel(application: Application) : AndroidViewModel(application) {
     var account: String? = null; private set
     var store: FinanceStore? = null; private set
     val changes = MutableStateFlow(0)
-    val status = MutableStateFlow("Ready when you are")
+    val status = MutableStateFlow("")
     val savedAccount get() = prefs.getString("account", null)
     val savedName get() = prefs.getString("username", "") ?: ""
     val wrappedRefresh get() = prefs.getString("refresh", null)
@@ -60,14 +60,14 @@ class WalletModel(application: Application) : AndroidViewModel(application) {
         openAccount(id)
         refresh = rawRefresh
         access = null
-        status.value = "Unlocked · local changes are safe offline"
+        status.value = "Offline"
         sync()
     }
 
     fun localOnly() {
         openAccount("local")
         refresh = null; access = null
-        status.value = "Local notebook · not linked to an account"
+        status.value = "On this device"
     }
 
     private fun acceptTokens(result: JSONObject, remember: Boolean = wrappedRefresh != null) {
@@ -89,7 +89,7 @@ class WalletModel(application: Application) : AndroidViewModel(application) {
         val local = store ?: return@withLock
         if (account == "local" || refresh == null) return@withLock
         try {
-            status.value = "Synchronizing…"
+            status.value = "Syncing…"
             if (access == null || System.currentTimeMillis() >= expiry) {
                 acceptTokens(api.call("refresh", JSONObject().put("refresh_token", refresh)))
             }
@@ -107,12 +107,12 @@ class WalletModel(application: Application) : AndroidViewModel(application) {
                 } while (page.getBoolean("has_more"))
             }
             val conflicts = local.rows(true).count { it.optBoolean("has_conflict") }
-            status.value = if (conflicts > 0) "$conflicts conflicts need your decision" else if (local.pendingCount() > 0) "Changes queued · undo is still available" else "Everything is up to date"
+            status.value = if (conflicts > 0) "Review ($conflicts)" else if (local.pendingCount() > 0) "Pending" else "Synced"
             changes.value++
         } catch (error: IOException) {
             status.value = if (error is ApiFailure) {
-                if (error.status == 401) "Session expired · sign in again; local changes are retained" else error.message ?: "Sync failed"
-            } else "Offline · changes saved on this device"
+                if (error.status == 401) "Sign in again" else error.message ?: "Sync failed"
+            } else "Offline"
             changes.value++
         }
     }

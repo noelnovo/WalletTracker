@@ -2,10 +2,14 @@ package win.downops.wallettracker.v2
 
 import android.content.Context
 import android.graphics.Color
+import android.graphics.Canvas
+import android.graphics.Paint
 import android.net.ConnectivityManager
 import android.net.Network
 import android.os.Bundle
 import android.text.InputType
+import android.text.Editable
+import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -100,7 +104,8 @@ class WalletActivity : AppCompatActivity() {
     private fun text(value: String, size: Float = 16f, color: Int = ink) = TextView(this).apply {
         text = value; textSize = size; setTextColor(color); setPadding(0, dp(5), 0, dp(5))
     }
-    private fun button(label: String, action: () -> Unit) = MaterialButton(this).apply {
+    private fun button(label: String, prominent: Boolean = true, action: () -> Unit) = MaterialButton(this, null,
+        if (prominent) com.google.android.material.R.attr.materialButtonStyle else com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
         text = label; isAllCaps = false; minHeight = dp(52); setOnClickListener { action() }
     }
     private fun input(parent: LinearLayout, hint: String, type: Int = InputType.TYPE_CLASS_TEXT): TextInputEditText {
@@ -120,16 +125,18 @@ class WalletActivity : AppCompatActivity() {
         showingLogin = false
         root.removeAllViews()
         val header = column()
-        header.addView(text("WALLET / ${if (BuildConfig.DEBUG) "DEV" else "PERSONAL"}", 12f, primary))
-        header.addView(text(when (screen) { 2 -> "Shared moments"; 3 -> "Your preferences"; else -> "Your spending" }, 30f))
-        header.addView(text(model.status.value, 13f, muted))
+        if (BuildConfig.DEBUG) header.addView(text("DEV", 11f, primary))
+        header.addView(text(when (screen) { 2 -> "Split bills"; 3 -> "Settings"; else -> "Expenses" }, 30f))
+        header.addView(text(model.status.value, 12f, muted).apply {
+            setOnClickListener { screen = 3; render() }
+        })
         root.addView(header)
         content = column()
         root.addView(content, LinearLayout.LayoutParams(-1, 0, 1f))
         when (screen) { 2 -> finances("bill"); 3 -> settings(); else -> finances("expense") }
         val nav = BottomNavigationView(this)
         nav.menu.add(0, 1, 0, "Expenses").setIcon(android.R.drawable.ic_menu_agenda)
-        nav.menu.add(0, 2, 1, "Split bills").setIcon(android.R.drawable.ic_menu_myplaces)
+        nav.menu.add(0, 2, 1, "Bills").setIcon(android.R.drawable.ic_menu_myplaces)
         nav.menu.add(0, 3, 2, "Settings").setIcon(android.R.drawable.ic_menu_preferences)
         nav.selectedItemId = screen
         nav.setOnItemSelectedListener { item -> screen = item.itemId; render(); true }
@@ -142,17 +149,15 @@ class WalletActivity : AppCompatActivity() {
         val body = column()
         val scroll = ScrollView(this).apply { isFillViewport = true; addView(body) }
         root.addView(scroll, LinearLayout.LayoutParams(-1, -1))
-        body.addView(text("WALLET TRACKER", 13f, primary))
-        body.addView(text("Less friction.\nMore clarity.", 38f))
-        body.addView(text("Track the everyday, share a meal, and keep moving — even offline.", 17f, muted))
-        if (BuildConfig.DEBUG) body.addView(text("DEVELOPMENT · isolated from your production wallet", 12f, primary))
+        body.addView(text("Wallet", 34f))
+        if (BuildConfig.DEBUG) body.addView(text("DEV", 11f, primary))
         val username = input(body, "Username").apply { setText(model.savedName) }
         val password = input(body, "Password", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD)
         val biometricAvailable = BiometricManager.from(this).canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG) == BiometricManager.BIOMETRIC_SUCCESS
-        val remember = MaterialCheckBox(this).apply { text = "Enable fingerprint unlock"; isChecked = biometricAvailable; isEnabled = biometricAvailable }
+        val remember = MaterialCheckBox(this).apply { text = "Fingerprint unlock"; isChecked = biometricAvailable; isEnabled = biometricAvailable }
         body.addView(remember)
         lateinit var signIn: MaterialButton
-        signIn = button("Sign in securely") {
+        signIn = button("Sign in") {
             if (username.text.isNullOrBlank() || password.text.isNullOrEmpty()) { message("Enter your username and password"); return@button }
             signIn.isEnabled = false
             task {
@@ -161,19 +166,20 @@ class WalletActivity : AppCompatActivity() {
             }
         }
         body.addView(signIn)
-        if (biometricAvailable && model.wrappedRefresh != null) body.addView(button("Unlock with fingerprint · works offline") { unlock() })
-        if (BuildConfig.ALLOW_REGISTER) body.addView(button("Create development account") {
+        if (biometricAvailable && model.wrappedRefresh != null) body.addView(button("Unlock", false) { unlock() })
+        if (BuildConfig.ALLOW_REGISTER) body.addView(button("Create account", false) {
+            if (username.text.toString().trim().length !in 3..128) { username.error = "3–128 characters"; return@button }
+            if (password.text.toString().length !in 12..1024) { password.error = "12–1024 characters"; return@button }
             task {
                 model.register(username.text.toString().trim(), password.text.toString())
-                message("Account created. You can now sign in.")
+                message("Account created")
             }
         })
-        body.addView(button("Use a separate local notebook") {
-            MaterialAlertDialogBuilder(this).setTitle("Local notebook")
-                .setMessage("This notebook is not linked to an account and will not sync. Your signed-in wallet remains separate. It is protected by the device lock, not account login.")
-                .setNegativeButton("Cancel", null).setPositiveButton("Continue") { _, _ -> model.localOnly(); render() }.show()
+        body.addView(button("Local wallet", false) {
+            MaterialAlertDialogBuilder(this).setTitle("Local wallet")
+                .setMessage("Only on this phone. No account or sync.")
+                .setNegativeButton("Cancel", null).setPositiveButton("Open") { _, _ -> model.localOnly(); render() }.show()
         })
-        body.addView(text("No password or shared server secret is saved on your phone. Fingerprint unlock protects a rotating session credential with Android Keystore.", 12f, muted))
     }
 
     private fun unlock() {
@@ -192,11 +198,10 @@ class WalletActivity : AppCompatActivity() {
                 override fun onAuthenticationError(errorCode: Int, errString: CharSequence) { message(errString.toString()) }
             })
             val info = BiometricPrompt.PromptInfo.Builder().setTitle("Unlock your wallet")
-                .setSubtitle("Your fingerprint unlocks this device's session")
                 .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
                 .setNegativeButtonText("Use password").build()
             prompt.authenticate(info, BiometricPrompt.CryptoObject(cipher))
-        } catch (_: Exception) { message("Fingerprint key unavailable or enrollment changed. Sign in with your password.") }
+        } catch (_: Exception) { message("Fingerprint unavailable. Sign in again.") }
     }
 
     private fun money(minor: Long, currency: String = "EUR"): String = NumberFormat.getCurrencyInstance().apply {
@@ -209,18 +214,33 @@ class WalletActivity : AppCompatActivity() {
             .map { (currency, values) -> money(values.sumOf { it.getJSONObject("payload").optLong("amount_minor") }, currency) }
         val summary = MaterialCardView(this).apply { radius = dp(24).toFloat(); strokeWidth = 0 }
         val inner = column()
-        inner.addView(text(if (kind == "bill") "TABLE TOTALS" else "TOTAL RECORDED", 12f, muted))
+        inner.addView(text("TOTAL", 11f, muted))
         inner.addView(text(totals.joinToString(" + ").ifEmpty { money(0) }, 32f, primary))
-        inner.addView(text("${rows.size} ${if (kind == "bill") "shared bills" else "expenses"} · swipe left to delete", 13f, muted))
         summary.addView(inner); content.addView(summary)
-        content.addView(button(if (kind == "bill") "+ Split a restaurant bill" else "+ Add an expense") { editor(kind) })
-        if (kind == "expense") content.addView(button("Manage categories") { categories() })
-        if (rows.isEmpty()) content.addView(text(if (kind == "bill") "A good meal, fairly shared.\nAdd your first bill to calculate exact shares." else "A little clarity starts here.\nCreate a category, then record your first expense.", 16f, muted))
+        val actions = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        actions.addView(button(if (kind == "bill") "Split bill" else "Expense") { editor(kind) }.apply {
+            setIconResource(android.R.drawable.ic_input_add)
+        }, LinearLayout.LayoutParams(0, -2, 1f))
+        if (kind == "expense") actions.addView(MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+            text = "Categories"; isAllCaps = false; setOnClickListener { categories() }
+        }, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(8) })
+        content.addView(actions)
+        if (rows.isEmpty()) content.addView(text(if (kind == "bill") "No bills yet" else "No expenses yet", 16f, muted))
         val list = RecyclerView(this).apply { layoutManager = LinearLayoutManager(this@WalletActivity) }
         val adapter = RecordAdapter(rows)
         list.adapter = adapter
         ItemTouchHelper(object : ItemTouchHelper.SimpleCallback(0, ItemTouchHelper.LEFT) {
             override fun onMove(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder, target: RecyclerView.ViewHolder) = false
+            override fun onChildDraw(canvas: Canvas, recyclerView: RecyclerView, holder: RecyclerView.ViewHolder, dx: Float, dy: Float, state: Int, active: Boolean) {
+                if (dx < 0) {
+                    val view = holder.itemView
+                    canvas.drawRoundRect(view.right + dx, view.top.toFloat(), view.right.toFloat(), view.bottom.toFloat(), dp(12).toFloat(), dp(12).toFloat(), Paint().apply { color = Color.rgb(174, 48, 48) })
+                    val icon = ContextCompat.getDrawable(this@WalletActivity, android.R.drawable.ic_menu_delete)!!
+                    val edge = dp(24); val right = view.right - dp(20); val top = view.top + (view.height - edge) / 2
+                    icon.setTint(Color.WHITE); icon.setBounds(right - edge, top, right, top + edge); icon.draw(canvas)
+                }
+                super.onChildDraw(canvas, recyclerView, holder, dx, dy, state, active)
+            }
             override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
                 val index = viewHolder.bindingAdapterPosition
                 if (index in rows.indices) stageDelete(rows[index])
@@ -238,11 +258,15 @@ class WalletActivity : AppCompatActivity() {
         override fun onBindViewHolder(holder: Holder, position: Int) {
             val row = rows[position]; val payload = row.getJSONObject("payload")
             holder.box.removeAllViews()
-            holder.box.addView(text(payload.optString("description"), 18f))
-            holder.box.addView(text(money(payload.optLong("amount_minor"), payload.optString("currency", "EUR")), 23f, primary))
+            val line = LinearLayout(this@WalletActivity).apply { gravity = Gravity.CENTER_VERTICAL }
+            line.addView(text(payload.optString("description"), 17f).apply { maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, -2, 1f))
+            line.addView(text(money(payload.optLong("amount_minor"), payload.optString("currency", "EUR")), 19f, primary).apply { setPadding(dp(12), 0, 0, 0) })
+            holder.box.addView(line)
             val detail = if (row.getString("kind") == "bill") "${payload.optJSONArray("participants")?.length() ?: 0} people · paid by ${payload.optString("paid_by")}" else categoryName(payload.optString("category_id"))
-            holder.box.addView(text("${payload.optString("date")}  ·  $detail${if (row.optBoolean("has_conflict")) "  ·  CONFLICT" else ""}", 12f, muted))
-            holder.box.setOnClickListener { if (row.optBoolean("has_conflict")) conflict(row) else editor(row.getString("kind"), row) }
+            holder.box.addView(text("${payload.optString("date")}  ·  $detail${if (row.optBoolean("has_conflict")) "  ·  Review" else ""}", 12f, muted))
+            holder.box.setOnClickListener {
+                when { row.optBoolean("has_conflict") -> conflict(row); row.getString("kind") == "bill" -> billDetails(row); else -> editor(row.getString("kind"), row) }
+            }
         }
     }
 
@@ -250,7 +274,7 @@ class WalletActivity : AppCompatActivity() {
     private fun categoryName(id: String) = categoryRows().firstOrNull { it.getString("id") == id }?.getJSONObject("payload")?.optString("name") ?: "Uncategorized"
     private fun categories() {
         val rows = categoryRows()
-        val options = rows.map { it.getJSONObject("payload").getString("name") + if (it.optBoolean("has_conflict")) " · conflict" else "" } + "+ New category"
+        val options = rows.map { it.getJSONObject("payload").getString("name") + if (it.optBoolean("has_conflict")) " ⚠" else "" } + "+ Category"
         MaterialAlertDialogBuilder(this).setTitle("Categories").setItems(options.toTypedArray()) { _, index ->
             if (index == rows.size) categoryEditor(null)
             else if (rows[index].optBoolean("has_conflict")) conflict(rows[index])
@@ -274,23 +298,46 @@ class WalletActivity : AppCompatActivity() {
 
     private fun editor(kind: String, row: JSONObject? = null) {
         val categories = categoryRows()
-        if (kind == "expense" && categories.isEmpty()) { categoryEditor(null); message("Create your first category to get started"); return }
+        if (kind == "expense" && categories.isEmpty()) { categoryEditor(null); return }
         val old = row?.getJSONObject("payload")
         val body = column()
-        val description = input(body, if (kind == "bill") "Restaurant / occasion" else "What was it for?").apply { setText(old?.optString("description")) }
-        val amount = input(body, "Total amount", InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL).apply {
+        val description = input(body, if (kind == "bill") "Restaurant" else "Description").apply { setText(old?.optString("description")) }
+        val amount = input(body, "Amount", InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL).apply {
             old?.let { setText(BigDecimal.valueOf(it.getLong("amount_minor"), 2).toPlainString()) }
         }
-        val date = input(body, "Date · YYYY-MM-DD").apply { setText(old?.optString("date") ?: SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())) }
+        val dateValue = old?.optString("date") ?: SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+        val date = button(dateValue, false) { }.apply { setIconResource(android.R.drawable.ic_menu_today) }
+        date.setOnClickListener {
+            val parts = date.text.toString().split('-').map(String::toInt)
+            android.app.DatePickerDialog(this, { _, year, month, day -> date.text = String.format(Locale.US, "%04d-%02d-%02d", year, month + 1, day) }, parts[0], parts[1] - 1, parts[2]).show()
+        }
         val currency = Spinner(this).apply { adapter = ArrayAdapter(this@WalletActivity, android.R.layout.simple_spinner_dropdown_item, listOf("EUR", "USD", "GBP")); setSelection(listOf("EUR", "USD", "GBP").indexOf(old?.optString("currency") ?: "EUR").coerceAtLeast(0)) }
-        body.addView(currency)
+        val metadata = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        metadata.addView(date, LinearLayout.LayoutParams(0, -2, 1f)); metadata.addView(currency, LinearLayout.LayoutParams(0, -2, 1f))
+        body.addView(metadata)
         val category = Spinner(this).apply { adapter = ArrayAdapter(this@WalletActivity, android.R.layout.simple_spinner_dropdown_item, categories.map { it.getJSONObject("payload").getString("name") }) }
         if (kind == "expense") { body.addView(category); category.setSelection(categories.indexOfFirst { it.getString("id") == old?.optString("category_id") }.coerceAtLeast(0)) }
-        val participants = if (kind == "bill") input(body, "People · comma-separated names").apply { setText(old?.optJSONArray("participants")?.let { array -> (0 until array.length()).joinToString(", ") { array.getString(it) } }) } else null
-        val paidBy = if (kind == "bill") input(body, "Who paid?").apply { setText(old?.optString("paid_by")) } else null
-        if (kind == "bill") body.addView(text("Split equally, down to the cent. Remainder cents go to people in list order. Tap a saved bill to see each share.", 12f, muted))
-        old?.optJSONArray("shares")?.let { shares -> for (i in 0 until shares.length()) { val share = shares.getJSONObject(i); body.addView(text("${share.getString("name")} · ${money(share.getLong("amount_minor"), old.optString("currency", "EUR"))}", 14f)) } }
-        val dialog = MaterialAlertDialogBuilder(this).setTitle(if (row == null) "Make it count" else "Edit record")
+        val participants = if (kind == "bill") input(body, "People").apply {
+            (parent.parent as? TextInputLayout)?.placeholderText = "Alex, Sam, …"
+            setText(old?.optJSONArray("participants")?.let { array -> (0 until array.length()).joinToString(", ") { array.getString(it) } })
+        } else null
+        val paidBy = if (kind == "bill") Spinner(this) else null
+        if (paidBy != null) {
+            body.addView(text("Paid by", 12f, muted)); body.addView(paidBy)
+            fun updatePayers() {
+                val selected = paidBy.selectedItem?.toString() ?: old?.optString("paid_by")
+                val people = participants!!.text.toString().split(',').map(String::trim).filter(String::isNotBlank)
+                paidBy.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, people)
+                paidBy.setSelection(people.indexOf(selected).coerceAtLeast(0))
+            }
+            participants!!.addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { updatePayers() }
+                override fun afterTextChanged(s: Editable?) {}
+            })
+            updatePayers()
+        }
+        val dialog = MaterialAlertDialogBuilder(this).setTitle(if (kind == "bill") "Split bill" else "Expense")
             .setView(ScrollView(this).apply { addView(body) }).setNegativeButton("Cancel", null).setPositiveButton("Save", null).create()
         dialog.setOnShowListener { dialog.getButton(-1).setOnClickListener {
             try {
@@ -304,7 +351,7 @@ class WalletActivity : AppCompatActivity() {
                 else {
                     val people = participants!!.text.toString().split(',').map { it.trim() }
                     require(people.size in 2..100 && people.all { it.isNotBlank() && it.length <= 80 } && people.distinct().size == people.size) { "Enter 2–100 unique people" }
-                    val payer = paidBy!!.text.toString().trim(); require(payer in people) { "The payer must be in the group" }
+                    val payer = paidBy!!.selectedItem?.toString().orEmpty(); require(payer in people) { "Choose who paid" }
                     val shares = JSONArray(); people.forEachIndexed { index, person -> shares.put(JSONObject().put("name", person).put("amount_minor", minor / people.size + if (index < minor % people.size) 1 else 0)) }
                     payload.put("participants", JSONArray(people)).put("paid_by", payer).put("shares", shares)
                 }
@@ -318,7 +365,7 @@ class WalletActivity : AppCompatActivity() {
         val store = model.store!!
         store.save(row.getString("kind"), row.getJSONObject("payload"), row, deleted = true, delay = 6500)
         render()
-        Snackbar.make(root, "Deleted from your wallet", 6000).setAction("Undo") {
+        Snackbar.make(root, "Deleted", 6000).setAction("Undo") {
             val latest = store.rows(true).first { it.getString("id") == row.getString("id") }
             store.save(row.getString("kind"), row.getJSONObject("payload"), latest)
             model.changed(); render()
@@ -326,51 +373,87 @@ class WalletActivity : AppCompatActivity() {
         model.syncSoon(6700)
     }
 
+    private fun billDetails(row: JSONObject) {
+        val payload = row.getJSONObject("payload")
+        val body = column()
+        body.addView(text(money(payload.getLong("amount_minor"), payload.optString("currency", "EUR")), 30f, primary))
+        body.addView(text(payload.optString("date"), 12f, muted))
+        val shares = payload.optJSONArray("shares") ?: JSONArray()
+        for (i in 0 until shares.length()) {
+            val share = shares.getJSONObject(i)
+            val line = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+            line.addView(text(share.getString("name") + if (share.getString("name") == payload.optString("paid_by")) " · paid" else ""), LinearLayout.LayoutParams(0, -2, 1f))
+            line.addView(text(money(share.getLong("amount_minor"), payload.optString("currency", "EUR")), 18f, primary))
+            body.addView(line)
+        }
+        MaterialAlertDialogBuilder(this).setTitle(payload.getString("description")).setView(body)
+            .setNegativeButton("Done", null).setPositiveButton("Edit") { _, _ -> editor("bill", row) }.show()
+    }
+
     private fun conflict(row: JSONObject) {
         val remote = model.store!!.remoteConflict(row.getString("id"))
-        fun describe(record: JSONObject?): String = if (record == null || record.optBoolean("deleted")) "Deleted" else record.getJSONObject("payload").toString(2)
-        MaterialAlertDialogBuilder(this).setTitle("Choose which version to keep")
-            .setMessage("Your device:\n${describe(row)}\n\nServer:\n${describe(remote)}\n\nKeeping yours creates a new conditional update. Another server change will ask you again.")
-            .setNegativeButton("Decide later", null)
-            .setNeutralButton("Use server") { _, _ -> model.store!!.resolve(row, false); model.changed(); render() }
-            .setPositiveButton("Keep mine") { _, _ -> model.store!!.resolve(row, true); model.changed(); render() }.show()
+        val body = column()
+        fun version(title: String, record: JSONObject?) {
+            val card = MaterialCardView(this).apply { radius = dp(16).toFloat() }
+            val detail = column(); detail.addView(text(title, 12f, muted))
+            if (record == null || record.optBoolean("deleted")) detail.addView(text("Deleted", 20f))
+            else {
+                val payload = record.getJSONObject("payload")
+                detail.addView(text(payload.optString("description", payload.optString("name")), 18f))
+                if (payload.has("amount_minor")) detail.addView(text(money(payload.getLong("amount_minor"), payload.optString("currency", "EUR")), 24f, primary))
+                if (payload.has("date")) detail.addView(text(payload.getString("date"), 12f, muted))
+                if (payload.has("category_id")) detail.addView(text(categoryName(payload.getString("category_id")), 12f, muted))
+                payload.optJSONArray("participants")?.let { people ->
+                    detail.addView(text((0 until people.length()).joinToString(", ") { people.getString(it) }, 14f))
+                    detail.addView(text("Paid by ${payload.optString("paid_by")}", 12f, muted))
+                }
+            }
+            card.addView(detail); body.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
+        }
+        version("THIS DEVICE", row); version("ONLINE", remote)
+        MaterialAlertDialogBuilder(this).setTitle("Keep which version?").setView(ScrollView(this).apply { addView(body) })
+            .setNegativeButton("Later", null)
+            .setNeutralButton("Use online") { _, _ -> model.store!!.resolve(row, false); model.changed(); render() }
+            .setPositiveButton("Keep local") { _, _ -> model.store!!.resolve(row, true); model.changed(); render() }.show()
     }
 
     private fun settings() {
         val scroll = ScrollView(this); val body = column(); scroll.addView(body); content.addView(scroll)
-        body.addView(text("ACCOUNT & SYNC", 12f, primary))
-        body.addView(text(if (model.account == "local") "Separate local notebook" else model.savedName, 22f))
-        body.addView(text("${model.store!!.pendingCount()} pending local changes\n${BuildConfig.API_BASE_URL}\nVersion ${BuildConfig.VERSION_NAME}", 13f, muted))
-        body.addView(button("Sync now") { model.syncSoon() })
+        body.addView(text(if (model.account == "local") "Local wallet" else model.savedName, 22f))
+        if (model.account != "local") {
+            body.addView(text("${model.store!!.pendingCount()} pending", 12f, muted))
+            body.addView(button("Sync") { model.syncSoon() }.apply { setIconResource(android.R.drawable.ic_popup_sync) })
+        }
         val conflicts = model.store!!.rows(true).filter { it.optBoolean("has_conflict") }
-        conflicts.forEach { row -> body.addView(button("Resolve: ${row.getJSONObject("payload").optString("description", row.getJSONObject("payload").optString("name", "Deleted record"))}") { conflict(row) }) }
-        body.addView(text("SECURITY", 12f, primary))
-        body.addView(text("HTTPS only · encrypted local records\nNon-exportable device keys · fingerprint unlock\nNo file import · no embedded server secret", 14f, muted))
-        body.addView(button("Lock wallet") { model.lock(); showingLogin = false; render() })
-        body.addView(button("Log out") {
-            MaterialAlertDialogBuilder(this).setTitle("Log out of this device?")
-                .setMessage("Local changes are retained in this account's encrypted database. If you are offline, server revocation cannot be confirmed; the local session is still removed.")
+        conflicts.forEach { row -> body.addView(button("⚠ ${row.getJSONObject("payload").optString("description", row.getJSONObject("payload").optString("name", "Deleted record"))}") { conflict(row) }) }
+        body.addView(button("Lock", false) { model.lock(); showingLogin = false; render() }.apply { setIconResource(android.R.drawable.ic_lock_lock) })
+        body.addView(button("Log out", false) {
+            MaterialAlertDialogBuilder(this).setTitle("Log out?")
+                .setMessage(if (model.store!!.pendingCount() > 0) "${model.store!!.pendingCount()} changes stay on this phone." else "Remove this device's session?")
                 .setNegativeButton("Cancel", null).setPositiveButton("Log out") { _, _ -> task {
                     try { model.logout() } finally { showingLogin = false; render() }
                 } }.show()
         })
-        body.addView(text("DANGER ZONE", 12f, primary))
-        body.addView(button("Reset expenses and shared bills…") {
-            MaterialAlertDialogBuilder(this).setTitle("Reset this wallet?")
-                .setMessage("All currently loaded expenses and shared bills will be deleted and synced. Categories stay. Pending conflicts must be resolved first. You can undo for 6 seconds.")
+        body.addView(button("Reset wallet…", false) {
+            MaterialAlertDialogBuilder(this).setTitle("Delete all expenses and bills?")
+                .setMessage(if (model.account == "local") "Categories stay." else "Categories stay. Deletes sync online.")
                 .setNegativeButton("Cancel", null).setPositiveButton("Reset") { _, _ ->
                     val records = model.store!!.rows().filter { it.getString("kind") != "category" }
                     if (model.store!!.rows(true).any { it.optBoolean("has_conflict") }) { message("Resolve conflicts before resetting"); return@setPositiveButton }
                     val store = model.store!!
                     records.forEach { store.save(it.getString("kind"), it.getJSONObject("payload"), it, deleted = true, delay = 6500) }
                     render()
-                    Snackbar.make(root, "${records.size} records reset", 6000).setAction("Undo") {
+                    Snackbar.make(root, "${records.size} deleted", 6000).setAction("Undo") {
                         records.forEach { old -> val latest = store.rows(true).first { it.getString("id") == old.getString("id") }; store.save(old.getString("kind"), old.getJSONObject("payload"), latest) }
                         model.changed(); render()
                     }.show()
                     model.syncSoon(6700)
                 }.show()
+        }.apply { setTextColor(com.google.android.material.color.MaterialColors.getColor(this@WalletActivity, androidx.appcompat.R.attr.colorError, Color.RED)); setIconResource(android.R.drawable.ic_menu_delete) })
+        body.addView(button("About · ${BuildConfig.VERSION_NAME}", false) {
+            MaterialAlertDialogBuilder(this).setTitle("Wallet")
+                .setMessage("${BuildConfig.API_BASE_URL}\n\nEncrypted on this device. Sync resumes when unlocked.")
+                .setPositiveButton("Done", null).show()
         })
-        body.addView(text("Offline edits sync automatically when this wallet is unlocked and connectivity returns. A locked or restarted app requires fingerprint unlock before it can refresh its session. Local notebook data is never silently merged into an account.", 12f, muted))
     }
 }
