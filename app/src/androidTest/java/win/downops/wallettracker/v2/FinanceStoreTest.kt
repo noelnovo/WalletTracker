@@ -84,4 +84,15 @@ class FinanceStoreTest {
         assertEquals("secret", vault.open(encrypted, "record:A"))
         try { vault.open(encrypted, "record:B"); fail("Wrong AAD must fail") } catch (_: javax.crypto.AEADBadTagException) { }
     }
+
+    @Test fun refreshCanBeWrappedButNotUnwrappedWithoutFingerprint() {
+        org.junit.Assume.assumeTrue(androidx.biometric.BiometricManager.from(context).canAuthenticate(
+            androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG) == androidx.biometric.BiometricManager.BIOMETRIC_SUCCESS)
+        val vault = DeviceVault(context, "instrumentation-${UUID.randomUUID()}")
+        val wrapped = vault.wrapRefresh("synthetic-refresh-${UUID.randomUUID()}")
+        assertTrue(wrapped.isNotBlank())
+        val attempted = runCatching { vault.unlockCipher().doFinal(android.util.Base64.decode(wrapped, android.util.Base64.NO_WRAP)) }
+        assertTrue("Private-key decryption must require a biometric match", attempted.isFailure)
+        vault.forgetLogin()
+    }
 }
