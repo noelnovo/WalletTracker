@@ -1,0 +1,4 @@
+{
+  "vault_signing_ready": false,
+  "reason": "Enable by reviewed source commit only after an authorized administrator verifies the exact GitHub OIDC roles, policies, tag rules and protected environments."
+}
