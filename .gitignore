@@ -47,3 +47,5 @@ google-services.json
 .android-sdk/
 .gradle-ci/
 __pycache__/
+.prod-signing-*/
+delivery/artifacts/

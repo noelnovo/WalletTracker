@@ -61,7 +61,8 @@ android {
           buildConfigField("String", "API_VERSION", "\"2\"")
           buildConfigField("boolean", "ALLOW_REGISTER", "false")
           buildConfigField("String", "SIGN_SECRET", "\"\"")
-          isMinifyEnabled = false
+          isMinifyEnabled = true
+          isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

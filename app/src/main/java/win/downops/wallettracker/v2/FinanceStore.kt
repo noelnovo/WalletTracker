@@ -10,15 +10,19 @@ import java.util.UUID
 
 /** One local database per server account. Only IDs/versions are stored unencrypted. */
 class FinanceStore(context: Context, account: String) : SQLiteOpenHelper(context,
-    "finance-v2-${DeviceVault.hash(account).take(32)}.db", null, 1) {
+    "finance-v2-${DeviceVault.hash(account).take(32)}.db", null, 2) {
     private val vault = DeviceVault(context, account)
     override fun onCreate(db: SQLiteDatabase) {
-        db.execSQL("CREATE TABLE records (id TEXT PRIMARY KEY, body TEXT NOT NULL, operation TEXT, conflict TEXT, not_before INTEGER NOT NULL DEFAULT 0)")
+        db.execSQL("CREATE TABLE records (id TEXT PRIMARY KEY, body TEXT NOT NULL, operation TEXT, conflict TEXT, not_before INTEGER NOT NULL DEFAULT 0, blocked_reason TEXT)")
         db.execSQL("CREATE TABLE metadata (id INTEGER PRIMARY KEY CHECK(id=1), cursor INTEGER NOT NULL)")
         db.execSQL("INSERT INTO metadata VALUES (1,0)")
+        db.execSQL("CREATE TABLE legacy_sources (id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL)")
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        error("An explicit non-destructive migration is required")
+        if (oldVersion < 2) {
+            db.execSQL("ALTER TABLE records ADD COLUMN blocked_reason TEXT")
+            db.execSQL("CREATE TABLE legacy_sources (id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL)")
+        }
     }
 
     private fun transaction(block: () -> Unit) {
@@ -26,12 +30,13 @@ class FinanceStore(context: Context, account: String) : SQLiteOpenHelper(context
         try { block(); writableDatabase.setTransactionSuccessful() } finally { writableDatabase.endTransaction() }
     }
 
-    @Synchronized fun rows(includeDeleted: Boolean = false): List<JSONObject> = readableDatabase.rawQuery("SELECT id,body,conflict FROM records", null).use { cursor ->
+    @Synchronized fun rows(includeDeleted: Boolean = false): List<JSONObject> = readableDatabase.rawQuery("SELECT id,body,conflict,blocked_reason FROM records", null).use { cursor ->
         buildList {
             while (cursor.moveToNext()) {
                 val id = cursor.getString(0)
                 val row = JSONObject(vault.open(cursor.getString(1), "record:$id"))
                 row.put("has_conflict", !cursor.isNull(2))
+                row.put("needs_review", !cursor.isNull(3))
                 if (includeDeleted || !row.optBoolean("deleted")) add(row)
             }
         }.sortedByDescending { it.optJSONObject("payload")?.optString("date", "") }
@@ -49,15 +54,17 @@ class FinanceStore(context: Context, account: String) : SQLiteOpenHelper(context
         val id = row.getString("id")
         val operation = JSONObject(row.toString()).put("operation_id", UUID.randomUUID().toString()).put("base_version", row.optInt("version"))
         operation.remove("version"); operation.remove("revision"); operation.remove("has_conflict")
+        operation.remove("needs_review"); operation.remove("blocked_reason")
         val values = ContentValues().apply {
             put("id", id); put("body", vault.seal(row.toString(), "record:$id"))
             put("operation", vault.seal(operation.toString(), "operation:$id"))
             putNull("conflict"); put("not_before", System.currentTimeMillis() + delay)
+            put("blocked_reason", row.optString("blocked_reason").takeIf(String::isNotBlank))
         }
         writableDatabase.insertWithOnConflict("records", null, values, SQLiteDatabase.CONFLICT_REPLACE)
     }
 
-    @Synchronized fun pending(): JSONArray = readableDatabase.rawQuery("SELECT id,operation FROM records WHERE operation IS NOT NULL AND conflict IS NULL AND not_before<=? ORDER BY rowid LIMIT 100", arrayOf(System.currentTimeMillis().toString())).use { cursor ->
+    @Synchronized fun pending(): JSONArray = readableDatabase.rawQuery("SELECT id,operation FROM records WHERE operation IS NOT NULL AND conflict IS NULL AND blocked_reason IS NULL AND not_before<=? ORDER BY rowid LIMIT 100", arrayOf(System.currentTimeMillis().toString())).use { cursor ->
         val operations = mutableListOf<JSONObject>()
         while (cursor.moveToNext()) operations.add(JSONObject(vault.open(cursor.getString(1), "operation:${cursor.getString(0)}")))
         // Dependencies first: create categories before expenses; delete expenses before categories.
@@ -121,5 +128,22 @@ class FinanceStore(context: Context, account: String) : SQLiteOpenHelper(context
         if (keepLocal) putPending(JSONObject(local.toString()).put("version", remote?.optInt("version") ?: 0))
         else if (remote != null) putRemote(remote)
         else writableDatabase.delete("records", "id=?", arrayOf(local.getString("id")))
+    }
+
+    @Synchronized fun importLegacy(source: String, records: List<JSONObject>, sourceFingerprint: String = DeviceVault.hash(JSONArray(records).toString())) = transaction {
+        val previous = readableDatabase.rawQuery("SELECT fingerprint FROM legacy_sources WHERE id=?", arrayOf(source)).use {
+            if (it.moveToFirst()) vault.open(it.getString(0), "legacy-proof:$source") else null
+        }
+        if (previous != null) {
+            check(previous == sourceFingerprint) { "Local migration source changed; recovery retained" }
+            return@transaction
+        }
+        records.forEach { row ->
+            val id = row.getString("id")
+            val collision = readableDatabase.rawQuery("SELECT 1 FROM records WHERE id=?", arrayOf(id)).use { it.moveToFirst() }
+            check(!collision) { "Local migration identity conflict" }
+            putPending(row)
+        }
+        writableDatabase.execSQL("INSERT INTO legacy_sources(id,fingerprint) VALUES (?,?)", arrayOf(source, vault.seal(sourceFingerprint, "legacy-proof:$source")))
     }
 }

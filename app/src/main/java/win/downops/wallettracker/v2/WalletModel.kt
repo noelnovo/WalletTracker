@@ -16,6 +16,7 @@ import java.io.IOException
 class WalletModel(application: Application) : AndroidViewModel(application) {
     private val prefs = application.getSharedPreferences("wallet-v2-auth", 0)
     private val api = FinanceApi()
+    private val legacy = LegacyUpgrade(application)
     private val mutex = Mutex()
     private var access: String? = null
     private var refresh: String? = null
@@ -31,6 +32,7 @@ class WalletModel(application: Application) : AndroidViewModel(application) {
     val unlocked get() = !locked && store != null
 
     init {
+        viewModelScope.launch(Dispatchers.IO) { runCatching { legacy.scrubPlainSession() } }
         viewModelScope.launch {
             while (true) { delay(30000); sync() }
         }
@@ -46,11 +48,27 @@ class WalletModel(application: Application) : AndroidViewModel(application) {
             DeviceVault(getApplication(), id).forgetLogin()
             openAccount(id); acceptTokens(result, remember)
         }
+        withContext(Dispatchers.IO) { legacy.retireCredentials() }
         sync()
     }
 
     suspend fun register(username: String, password: String) {
         api.call("register", JSONObject().put("username", username).put("password", password))
+    }
+
+    fun legacyCredentials(): LegacyUpgrade.Credentials? = legacy.credentials()
+
+    suspend fun legacySnapshot(): LegacyUpgrade.Snapshot? = withContext(Dispatchers.IO) {
+        if (unlocked) legacy.snapshot() else null
+    }
+
+    suspend fun migrateLegacy(snapshot: LegacyUpgrade.Snapshot) {
+        mutex.withLock {
+            check(unlocked)
+            val destination = "${win.downops.wallettracker.BuildConfig.API_BASE_URL}:${account!!}"
+            withContext(Dispatchers.IO) { legacy.migrate(snapshot, destination, store!!) }
+        }
+        changed()
     }
 
     private fun openAccount(id: String) {

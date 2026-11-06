@@ -54,6 +54,9 @@ import java.text.DateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import java.security.KeyStore
+import javax.crypto.SecretKey
+import javax.crypto.spec.IvParameterSpec
 import javax.crypto.Cipher
 
 /** Material 3 shell. Data, transport, crypto and sync are deliberately outside the view. */
@@ -68,6 +71,7 @@ class WalletActivity : AppCompatActivity() {
     private var categoryNames = emptyMap<String, String>()
     private val activeDialogs = mutableSetOf<androidx.appcompat.app.AlertDialog>()
     private var activeSnackbar: Snackbar? = null
+    private var migrationCheckedForAccount: String? = null
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) { runOnUiThread { model.syncSoon() } }
     }
@@ -160,6 +164,7 @@ class WalletActivity : AppCompatActivity() {
 
     private fun render() {
         if (!model.unlocked) {
+            migrationCheckedForAccount = null
             activeSnackbar?.dismiss(); activeSnackbar = null
             visibleRows = emptyList(); categoryNames = emptyMap()
             if (!showingLogin) login()
@@ -187,6 +192,7 @@ class WalletActivity : AppCompatActivity() {
         nav.selectedItemId = screen
         nav.setOnItemSelectedListener { item -> screen = item.itemId; render(); true }
         root.addView(nav)
+        offerLegacyMigration()
     }
 
     private fun login() {
@@ -197,7 +203,8 @@ class WalletActivity : AppCompatActivity() {
         root.addView(scroll, LinearLayout.LayoutParams(-1, -1))
         body.addView(text("Wallet", 34f))
         if (BuildConfig.DEBUG) body.addView(text("DEV", 11f, primary))
-        val username = input(body, "Username").apply { setText(model.savedName) }
+        val legacyCredentials = model.legacyCredentials()
+        val username = input(body, "Username").apply { setText(model.savedName.ifEmpty { legacyCredentials?.username.orEmpty() }) }
         val password = input(body, "Password", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD)
         val biometricAvailable = BiometricManager.from(this).canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG) == BiometricManager.BIOMETRIC_SUCCESS
         val remember = MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
@@ -230,6 +237,7 @@ class WalletActivity : AppCompatActivity() {
         if (biometricAvailable) signInActions.addView(remember, LinearLayout.LayoutParams(dp(56), dp(56)).apply { marginStart = dp(8) })
         body.addView(signInActions)
         if (biometricAvailable && model.wrappedRefresh != null) body.addView(button("Unlock", false) { unlock() }.apply { setIconResource(R.drawable.ic_fingerprint) })
+        else if (biometricAvailable && legacyCredentials != null) body.addView(button("Unlock", false) { unlockLegacy(legacyCredentials) }.apply { setIconResource(R.drawable.ic_fingerprint) })
         if (BuildConfig.ALLOW_REGISTER) body.addView(button("Create account", false) {
             if (username.text.toString().trim().length !in 3..128) { username.error = "3–128 characters"; return@button }
             if (password.text.toString().length !in 12..1024) { password.error = "12–1024 characters"; return@button }
@@ -265,6 +273,50 @@ class WalletActivity : AppCompatActivity() {
                 .setNegativeButtonText("Use password").build()
             prompt.authenticate(info, BiometricPrompt.CryptoObject(cipher))
         } catch (_: Exception) { message("Fingerprint unavailable. Sign in again.") }
+    }
+
+    private fun unlockLegacy(credentials: LegacyUpgrade.Credentials) {
+        try {
+            val key = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.getKey("USER_KEY", null) as SecretKey
+            val cipher = Cipher.getInstance("AES/CBC/PKCS7Padding").apply {
+                init(Cipher.DECRYPT_MODE, key, IvParameterSpec(android.util.Base64.decode(credentials.iv, android.util.Base64.NO_WRAP)))
+            }
+            val prompt = BiometricPrompt(this, ContextCompat.getMainExecutor(this), object : BiometricPrompt.AuthenticationCallback() {
+                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                    task {
+                        val bytes = requireNotNull(result.cryptoObject?.cipher).doFinal(android.util.Base64.decode(credentials.ciphertext, android.util.Base64.NO_WRAP))
+                        try {
+                            val parts = bytes.toString(Charsets.UTF_8).split(';', limit = 2)
+                            check(parts.size == 2 && (credentials.username.isEmpty() || parts[0] == credentials.username)) { "Sign in again" }
+                            model.login(parts[0], parts[1], true)
+                            render()
+                        } finally { bytes.fill(0) }
+                    }
+                }
+                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) { message(errString.toString()) }
+            })
+            prompt.authenticate(BiometricPrompt.PromptInfo.Builder().setTitle("Unlock your wallet")
+                .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
+                .setNegativeButtonText("Use password").build(), BiometricPrompt.CryptoObject(cipher))
+        } catch (_: Exception) { message("Fingerprint unavailable. Sign in again.") }
+    }
+
+    private fun offerLegacyMigration() {
+        val account = model.account ?: return
+        if (migrationCheckedForAccount == account) return
+        migrationCheckedForAccount = account
+        task {
+            val snapshot = model.legacySnapshot() ?: return@task
+            if (!model.unlocked || model.account != account) return@task
+            val target = if (account == "local") "Local wallet" else model.savedName
+            val details = "${snapshot.expenses} expenses · ${snapshot.categories} categories" +
+                (if (snapshot.reviewCount > 0) "\n${snapshot.reviewCount} need review" else "") +
+                (if (snapshot.retainedOtherRows > 0) "\n${snapshot.retainedOtherRows} other records archived" else "")
+            MaterialAlertDialogBuilder(this@WalletActivity).setTitle("Move local data to $target?")
+                .setMessage(details).setNegativeButton("Not now", null)
+                .setPositiveButton("Move") { _, _ -> task { model.migrateLegacy(snapshot); render() } }
+                .create().let(::showDialog)
+        }
     }
 
     private fun money(minor: Long, currency: String = "EUR"): String = NumberFormat.getCurrencyInstance().apply {
@@ -326,7 +378,7 @@ class WalletActivity : AppCompatActivity() {
             line.addView(text(money(payload.optLong("amount_minor"), payload.optString("currency", "EUR")), 19f, primary).apply { setPadding(dp(12), 0, 0, 0) })
             holder.box.addView(line)
             val detail = if (row.getString("kind") == "bill") "${payload.optJSONArray("participants")?.length() ?: 0} people · paid by ${payload.optString("paid_by")}" else categoryName(payload.optString("category_id"))
-            holder.box.addView(text("${payload.optString("date")}  ·  $detail${if (row.optBoolean("has_conflict")) "  ·  Review" else ""}", 12f, muted))
+            holder.box.addView(text("${payload.optString("date")}  ·  $detail${if (row.optBoolean("has_conflict") || row.optBoolean("needs_review")) "  ·  Review" else ""}", 12f, muted))
             holder.box.setOnClickListener {
                 when { row.optBoolean("has_conflict") -> conflict(row); row.getString("kind") == "bill" -> billDetails(row); else -> editor(row.getString("kind"), row) }
             }
@@ -337,7 +389,7 @@ class WalletActivity : AppCompatActivity() {
     private fun categoryName(id: String) = categoryNames[id] ?: "Uncategorized"
     private fun categories() {
         val rows = categoryRows()
-        val options = rows.map { it.getJSONObject("payload").getString("name") + if (it.optBoolean("has_conflict")) " ⚠" else "" } + "+ Category"
+        val options = rows.map { it.getJSONObject("payload").getString("name") + if (it.optBoolean("has_conflict") || it.optBoolean("needs_review")) " ⚠" else "" } + "+ Category"
         MaterialAlertDialogBuilder(this).setTitle("Categories").setItems(options.toTypedArray()) { _, index ->
             if (index == rows.size) categoryEditor(null)
             else if (rows[index].optBoolean("has_conflict")) conflict(rows[index])
@@ -360,7 +412,7 @@ class WalletActivity : AppCompatActivity() {
     }
 
     private fun editor(kind: String, row: JSONObject? = null) {
-        val categories = categoryRows()
+        val categories = categoryRows().filter { !it.optBoolean("needs_review") && !it.optBoolean("has_conflict") }
         if (kind == "expense" && categories.isEmpty()) { categoryEditor(null) { editor(kind, row) }; return }
         val old = row?.getJSONObject("payload")
         val body = column()
@@ -368,14 +420,18 @@ class WalletActivity : AppCompatActivity() {
         val amount = input(body, "Amount", InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL).apply {
             old?.let { setText(BigDecimal.valueOf(it.getLong("amount_minor"), 2).toPlainString()) }
         }
-        var selectedDay = old?.optString("date") ?: SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
-        val iso = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }
+        val today = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+        val iso = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC"); isLenient = false }
+        val originalDay = old?.optString("date") ?: today
+        var dateConfirmed = originalDay.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) && runCatching { iso.format(requireNotNull(iso.parse(originalDay))) == originalDay }.getOrDefault(false)
+        var selectedDay = if (dateConfirmed) originalDay else today
         val displayDate = DateFormat.getDateInstance(DateFormat.MEDIUM).apply { timeZone = TimeZone.getTimeZone("UTC") }
         val dateBox = TextInputLayout(this).apply {
             hint = "Date"; boxBackgroundMode = TextInputLayout.BOX_BACKGROUND_OUTLINE
             endIconMode = TextInputLayout.END_ICON_CUSTOM; setEndIconDrawable(R.drawable.ic_calendar)
             endIconContentDescription = "Choose date"
         }
+        if (!dateConfirmed) dateBox.error = "Choose date"
         val date = TextInputEditText(dateBox.context).apply {
             setText(displayDate.format(requireNotNull(iso.parse(selectedDay))))
             inputType = InputType.TYPE_NULL; isFocusable = false; isCursorVisible = false
@@ -387,6 +443,7 @@ class WalletActivity : AppCompatActivity() {
                 .setSelection(requireNotNull(iso.parse(selectedDay)).time).build().apply {
                     addOnPositiveButtonClickListener { value ->
                         selectedDay = iso.format(Date(value)); date.setText(displayDate.format(Date(value)))
+                        dateConfirmed = true; dateBox.error = null
                     }
                 }.show(supportFragmentManager, "wallet-date")
         }
@@ -435,6 +492,7 @@ class WalletActivity : AppCompatActivity() {
                 val minor = BigDecimal(amount.text.toString().replace(',', '.')).movePointRight(2).setScale(0, RoundingMode.UNNECESSARY).longValueExact()
                 require(minor in 1..99999999999) { "Enter a positive amount with at most two decimals" }
                 val note = description.text.toString().trim(); require(note.isNotEmpty() && note.length <= 255) { "Enter a description up to 255 characters" }
+                require(dateConfirmed) { "Choose a date" }
                 val day = selectedDay; val parser = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { isLenient = false }
                 require(day.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) && parser.format(requireNotNull(parser.parse(day))) == day) { "Enter a valid YYYY-MM-DD date" }
                 val payload = JSONObject().put("description", note).put("amount_minor", minor).put("currency", currency.text.toString()).put("date", day)
@@ -518,6 +576,12 @@ class WalletActivity : AppCompatActivity() {
         }
         val conflicts = model.store!!.rows(true).filter { it.optBoolean("has_conflict") }
         conflicts.forEach { row -> body.addView(button("⚠ ${row.getJSONObject("payload").optString("description", row.getJSONObject("payload").optString("name", "Deleted record"))}") { conflict(row) }) }
+        visibleRows.filter { it.optBoolean("needs_review") }.forEach { row ->
+            body.addView(button("Review · ${row.getJSONObject("payload").optString("description", row.getJSONObject("payload").optString("name"))}", false) {
+                if (row.getString("kind") == "category") categoryEditor(row) else editor(row.getString("kind"), row)
+            })
+        }
+        body.addView(button("Local data…", false) { migrationCheckedForAccount = null; offerLegacyMigration() })
         body.addView(button("Lock", false) { model.lock(); showingLogin = false; render() }.apply { setIconResource(android.R.drawable.ic_lock_lock) })
         body.addView(button("Log out", false) {
             MaterialAlertDialogBuilder(this).setTitle("Log out?")

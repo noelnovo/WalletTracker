@@ -13,6 +13,11 @@ VAULT = 'https://vault.int.downops.win'
 DEV_SIGNING_PATH = 'downops/data/apps/wallettracker/dev/mobile'
 
 
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 def request(path, data=None, token=None):
     headers = {'Content-Type': 'application/json'}
     if token:
@@ -20,7 +25,7 @@ def request(path, data=None, token=None):
     req = urllib.request.Request(VAULT + '/v1/' + path,
                                  data=json.dumps(data).encode() if data is not None else None,
                                  headers=headers)
-    with urllib.request.urlopen(req, timeout=30) as response:
+    with urllib.request.build_opener(NoRedirect()).open(req, timeout=30) as response:
         return json.load(response)
 
 
