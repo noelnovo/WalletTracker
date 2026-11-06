@@ -56,6 +56,13 @@ class GitHubIdentityTests(unittest.TestCase):
                 self.assertEqual(claims['ref'], 'refs/tags/v*')
                 self.assertEqual(settings['token_policies'], ['wallettracker-android-ci-prod'])
 
+    def test_ui_ready_role_bodies_exactly_match_reviewed_plan(self):
+        root = pathlib.Path(__file__).parent
+        plan = json.loads((root / 'github-actions-vault-plan.json').read_text())
+        for suffix in ('dev', 'prod'):
+            body = json.loads((root / ('github-actions/role-' + suffix + '.json')).read_text())
+            self.assertEqual(body, plan['roles']['wallettracker-mobile-ci-' + suffix])
+
 
 if __name__ == '__main__':
     unittest.main()
