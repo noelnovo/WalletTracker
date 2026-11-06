@@ -64,6 +64,11 @@ class DevSigningTests(unittest.TestCase):
         self.assertEqual(plan['policy'], 'path "downops/data/apps/wallettracker/dev/mobile" { capabilities = ["read"] }')
         self.assertNotIn('KEY_PASSWORD', plan['required_keys'])
 
+    def test_ci_dev_job_explicitly_uses_the_verified_stable_signer(self):
+        pipeline = (build_dev.ROOT / '.gitlab/ci/pipeline.yml').read_text()
+        job = pipeline.split('\ndev-apk:\n', 1)[1].split('\nprod-apk:\n', 1)[0]
+        self.assertIn('DEV_SIGNING_READY: "true"', job)
+
 
 if __name__ == '__main__':
     unittest.main()

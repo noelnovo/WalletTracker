@@ -32,6 +32,9 @@ contract:
 dev-apk:
   extends: .android-build
   resource_group: wallettracker-android-dev
+  variables:
+    # Scoped Vault record/role verified; never silently use disposable CI signing.
+    DEV_SIGNING_READY: "true"
   rules:
     - if: '$CI_COMMIT_BRANCH == "dev" && $ANDROID_CI_CAPACITY_READY == "true"'
     - if: '$CI_COMMIT_BRANCH == "dev"'
