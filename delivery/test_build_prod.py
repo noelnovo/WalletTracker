@@ -128,6 +128,7 @@ class ProductionSigningTests(unittest.TestCase):
         self.assertIn('runs-on: ubuntu-latest', workflow)
         self.assertIn('fetch-depth: 0', workflow)
         self.assertNotIn('persist-credentials: true', workflow)
+        self.assertEqual(workflow.count('uses: android-actions/setup-android@v3'), workflow.count('packages: platform-tools'))
 
 
 if __name__ == '__main__':
