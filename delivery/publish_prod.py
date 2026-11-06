@@ -46,6 +46,8 @@ def tag_commit(tag, token):
 
 
 def validate_artifact(receipt, tag, sha, directory):
+    if receipt.get('purpose') != 'release' or receipt.get('publishable') is not True:
+        raise RuntimeError('A signing-validation artifact can never authorize publication')
     if receipt.get('tag') != tag or receipt.get('source_revision') != sha:
         raise RuntimeError('APK receipt does not match the protected release source')
     if receipt.get('package') != 'win.downops.wallettracker' or receipt.get('signer_matches_previous_release') is not True:
@@ -55,11 +57,16 @@ def validate_artifact(receipt, tag, sha, directory):
     apk = directory / ('WalletTracker-' + tag + '.apk')
     if hashlib.sha256(apk.read_bytes()).hexdigest() != receipt.get('apk_sha256'):
         raise RuntimeError('Production APK checksum mismatch')
+    checksum = directory / (apk.name + '.sha256')
+    if checksum.read_text().strip() != receipt['apk_sha256'] + '  ' + apk.name:
+        raise RuntimeError('Production checksum sidecar differs from the verified APK')
     return apk
 
 
 def main():
     env = os.environ.copy()
+    if env.get('GITHUB_RELEASE_READY') != 'true':
+        raise RuntimeError('GitLab publication requires the verified repository-scoped credential gate')
     tag = validate_identity(env)
     verify_backend()
     directory = ROOT / 'delivery/artifacts'

@@ -1,9 +1,0 @@
-name: Release ownership
-on: workflow_dispatch
-permissions:
-  contents: read
-jobs:
-  ownership:
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo 'Production APK build/signing runs in protected GitLab CI. GitHub release publication uses the authorized server-side REST operator, outside CI. This mirror workflow reads no credentials or signing keys.'

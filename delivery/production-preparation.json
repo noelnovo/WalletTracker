@@ -34,8 +34,10 @@
     "production_writer": "legacy v1 active",
     "production_main_alembic_head": "f19f76872f76",
     "production_tenant_alembic_head": "c34bd55b3ea7",
-    "publication_write_identity": "selected authenticated server-side operator REST; real asset upload untested",
-    "automated_ci_publication": "disabled; distinct CI credential intentionally absent"
+    "publication_write_identity": "GitLab CI selected; repository-only GitHub credential still missing; estate token must not enter CI",
+    "automated_ci_publication": "gated off by default GITHUB_RELEASE_READY=false until scoped credential verified",
+    "github_actions": "removed; GitHub retained only as mirror and release-download host",
+    "production_signing_validation": "protected ci-check job is nonpublishable, retains receipt only, and does not replace release gates"
   },
   "safety": {
     "production_main_merged": false,

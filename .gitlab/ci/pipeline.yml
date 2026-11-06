@@ -3,6 +3,11 @@ stages: [test, build, publish]
 default:
   interruptible: true
 
+variables:
+  GIT_DEPTH: "0"
+  # Enable only after the distinct repository-scoped publication credential exists.
+  GITHUB_RELEASE_READY: "false"
+
 contract:
   stage: test
   image: python:3.13-alpine
@@ -13,6 +18,7 @@ contract:
 .android-build:
   stage: build
   image: eclipse-temurin:21-jdk
+  resource_group: wallettracker-android-build
   id_tokens:
     VAULT_ID_TOKEN:
       aud: https://vault.int.downops.win
@@ -31,7 +37,6 @@ contract:
 
 dev-apk:
   extends: .android-build
-  resource_group: wallettracker-android-dev
   variables:
     # Scoped Vault record/role verified; never silently use disposable CI signing.
     DEV_SIGNING_READY: "true"
@@ -49,7 +54,6 @@ dev-apk:
 
 prod-apk:
   extends: .android-build
-  resource_group: wallettracker-android-prod
   interruptible: false
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+$/ && $CI_COMMIT_REF_PROTECTED == "true"'
@@ -62,6 +66,21 @@ prod-apk:
     paths: [delivery/artifacts/*.apk, delivery/artifacts/*.sha256, delivery/artifacts/release-receipt.json]
     expire_in: 30 days
 
+prod-signing-check:
+  extends: .android-build
+  interruptible: false
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+-ci-check(\.[1-9][0-9]*)?$/ && $CI_COMMIT_REF_PROTECTED == "true"'
+      when: manual
+  environment: production-validation
+  script:
+    - python3 delivery/check_prod.py
+  artifacts:
+    name: wallettracker-production-check-$CI_COMMIT_TAG
+    # The signed test APK is deleted; validation can never feed a release upload.
+    paths: [delivery/check-artifacts/production-check-receipt.json]
+    expire_in: 7 days
+
 publish-prod:
   stage: publish
   image: python:3.13-alpine
@@ -72,9 +91,8 @@ publish-prod:
     VAULT_ID_TOKEN:
       aud: https://vault.int.downops.win
   rules:
-    # Owner selected server-side operator REST publication, not CI publication.
-    # Keep this job disabled; the separate CI credential is intentionally absent.
-    - when: never
+    - if: '$GITHUB_RELEASE_READY == "true" && $CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+$/ && $CI_COMMIT_REF_PROTECTED == "true"'
+      when: manual
   environment: production
   before_script:
     - apk add --no-cache git

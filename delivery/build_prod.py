@@ -48,6 +48,26 @@ def validate_identity(env):
     return tag
 
 
+def validate_check_identity(env):
+    """A protected dev-source signing exercise, never a release authorization."""
+    tag = env.get('CI_COMMIT_TAG', '')
+    expected = r'v' + re.escape(version()) + r'-ci-check(?:\.[1-9][0-9]*)?'
+    if (env.get('CI_PROJECT_ID') != '31' or env.get('CI_PROJECT_NAMESPACE') != 'downops'
+            or env.get('CI_COMMIT_REF_PROTECTED') != 'true' or not re.fullmatch(expected, tag)):
+        raise RuntimeError('Signing validation requires the exact protected project31 check tag')
+    sha = env.get('CI_COMMIT_SHA', '')
+    if not re.fullmatch('[a-f0-9]{40}', sha):
+        raise RuntimeError('A verified check source revision is required')
+    command(['git', 'fetch', 'origin', 'dev'], env)
+    if command(['git', 'rev-parse', 'HEAD'], env) != sha:
+        raise RuntimeError('Check source revision mismatch')
+    command(['git', 'merge-base', '--is-ancestor', sha, 'origin/dev'], env)
+    mirror = command(['git', 'ls-remote', 'https://github.com/noelnovo/WalletTracker.git', 'refs/heads/dev'], env)
+    if not mirror.split() or mirror.split()[0] != command(['git', 'rev-parse', 'origin/dev'], env):
+        raise RuntimeError('Signing validation requires synchronized GitLab/GitHub dev')
+    return tag
+
+
 def verify_backend(require_v2=True):
     request = urllib.request.Request('https://api.downops.win/api/v1/ready', headers={'User-Agent': 'WalletTracker-Production-Release'})
     with urllib.request.urlopen(request, timeout=30) as response:
@@ -85,9 +105,9 @@ def validate_built_configuration(sdk, apk, env):
         raise RuntimeError('Production API, registration or embedded-secret configuration is unsafe')
 
 
-def main():
+def main(*, validation=False):
     env = os.environ.copy()
-    tag = validate_identity(env)
+    tag = validate_check_identity(env) if validation else validate_identity(env)
     # Build/sign before the write-freeze to minimize downtime; publication gates API-v2.
     verify_backend(require_v2=False)
     token = vault_request('auth/gitlab-ci/login', {'role': 'wallettracker-android-ci-prod', 'jwt': env['VAULT_ID_TOKEN']})['auth']['client_token']
@@ -98,7 +118,7 @@ def main():
     env['API_BASE_URL'] = 'https://api.downops.win'
     env['PROD_KEYSTORE_PASSWORD'] = values['KEYSTORE_PASSWORD']
     env['PROD_KEY_PASSWORD'] = values.get('KEY_PASSWORD') or values['KEYSTORE_PASSWORD']
-    output = ROOT / 'delivery/artifacts'
+    output = ROOT / ('delivery/check-artifacts' if validation else 'delivery/artifacts')
     output.mkdir(parents=True, exist_ok=True)
     directory = pathlib.Path(tempfile.mkdtemp(prefix='.prod-signing-', dir=ROOT))
     try:
@@ -120,7 +140,7 @@ def main():
                        cwd=ROOT, env=build_env, check=True)
         unsigned = ROOT / 'app/build/outputs/apk/release/app-release-unsigned.apk'
         aligned = directory / 'aligned.apk'
-        target = output / ('WalletTracker-' + tag + '.apk')
+        target = directory / 'production-check.apk' if validation else output / ('WalletTracker-' + tag + '.apk')
         command([str(sdk / 'zipalign'), '-p', '-f', '4', str(unsigned), str(aligned)], env)
         command([str(sdk / 'apksigner'), 'sign', '--ks', str(keyfile), '--ks-key-alias', values['KEY_ALIAS'],
                  '--ks-pass', 'env:PROD_KEYSTORE_PASSWORD', '--key-pass', 'env:PROD_KEY_PASSWORD',
@@ -128,11 +148,16 @@ def main():
         signer(sdk / 'apksigner', target, env)
         validate_built_configuration(sdk, target, env)
         checksum = hashlib.sha256(target.read_bytes()).hexdigest()
-        (output / (target.name + '.sha256')).write_text(checksum + '  ' + target.name + '\n')
-        (output / 'release-receipt.json').write_text(json.dumps({'tag': tag, 'source_revision': env['CI_COMMIT_SHA'],
+        if not validation:
+            (output / (target.name + '.sha256')).write_text(checksum + '  ' + target.name + '\n')
+        receipt_name = 'production-check-receipt.json' if validation else 'release-receipt.json'
+        (output / receipt_name).write_text(json.dumps({'tag': tag, 'source_revision': env['CI_COMMIT_SHA'],
             'package': 'win.downops.wallettracker', 'signer_matches_previous_release': True,
-            'api_version': 2, 'registration_enabled': False, 'apk_sha256': checksum}, indent=2) + '\n')
-        print('Production APK built, signed and verified; publication is a separate approved step', flush=True)
+            'api_version': 2, 'registration_enabled': False, 'apk_sha256': checksum,
+            'purpose': 'signing-validation' if validation else 'release',
+            'publishable': not validation, 'signed_apk_retained': not validation}, indent=2) + '\n')
+        print('Production signing validation passed; test APK is not retained or publishable' if validation
+              else 'Production APK built, signed and verified; publication is a separate approved step', flush=True)
     finally:
         shutil.rmtree(directory)
 

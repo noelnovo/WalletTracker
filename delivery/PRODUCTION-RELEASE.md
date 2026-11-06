@@ -39,13 +39,15 @@ backup schedule, Kubernetes backup Job or backup PVC may be added.
 8. The staged APK/checksum/receipt must remain unchanged after approval; the dev
    key is never a production input. Shared2GB runner capacity must be sufficient
    and isolated, not competing with heavy backend jobs.
-9. The selected server-side operator uses authenticated GitHub REST outside CI to
+9. GitLab `publish-prod` uses a separate repository-scoped GitHub credential to
    upload the **verified CI APK**, checksum and receipt to a draft GitHub release.
    Gate live API-v2, exact source/tag identity, independent APK signature and all
    uploaded digests before publishing to `noelnovo/WalletTracker`. Keep the estate
-   credential server-side; never copy it into CI. Real asset upload remains an
-   untested gate until successful. GitLab `publish-prod` is explicitly disabled;
-   its separate CI credential remains absent. Publishing is not accomplished by
+    credential server-side; never copy it into CI. Real asset upload remains an
+    untested gate until successful. The distinct CI publication credential is
+    currently absent: `GITHUB_RELEASE_READY` defaults to false. Enable it only
+    after the repository-only credential is staged/verified at the reviewed
+    delivery path. Publishing is not accomplished by
    building an unsigned APK or merely creating a tag.
 
 The exact Android role plan is published on both hosts at
@@ -58,6 +60,33 @@ Production staging receipt:
 The existing PKCS12 signer is verified unchanged. No database recovery proof or
 release follows from staging alone. See backend `delivery/PRODUCTION-OPS-HANDOFF.md`.
 Retain old sources/grants until verified cutover and explicit retirement approval.
+
+## GitLab-only pipeline testing
+
+GitLab project31 `downops/wallet-tracker-android` owns all checks, builds, signing
+and publication. `.gitlab-ci.yml` includes `.gitlab/ci/pipeline.yml`. GitHub Actions
+workflows have been removed; GitHub remains the mirror and release-download host.
+All Android builds share one resource group for the2GiB runner.
+
+- `dev-apk` uses the verified, distinct dev signing record with
+  `DEV_SIGNING_READY=true`. It remains manual unless capacity is explicitly ready.
+- `prod-signing-check` is manual on protected `v3.0.0-ci-check` tags (optional
+  positive numeric suffix for a new immutable test tag). It requires synchronized
+  GitLab/GitHub dev and exercises real production JWT login, signing, unchanged
+  public certificate and APK configuration. Only a **nonpublishable receipt** is
+  retained; the signed test APK is deleted. This is not a release or promotion.
+- `prod-apk` still requires an exact protected release version tag whose source
+  is on main, main mirror equality and the existing signer. No check tag can pass
+  its identity guard.
+- `publish-prod` is manual only on protected strict-semver release tags and only
+  with `GITHUB_RELEASE_READY=true`. It rejects signing-validation receipts and
+  requires live production API-v2. It never uses the server estate credential.
+
+The production tag rule is `v*`, Maintainer-only creation. Do not loosen JWT claims
+or tag protections to make a test pass. The distinct fine-grained GitHub credential
+must be restricted to `noelnovo/WalletTracker`, Contents read/write and Metadata
+read, stored as `GITHUB_RELEASE_TOKEN` at
+`downops/apps/wallettracker/delivery/github-release`; never paste it into chat.
 
 ## Release notes to preserve
 
