@@ -49,3 +49,4 @@ google-services.json
 __pycache__/
 .prod-signing-*/
 delivery/artifacts/
+delivery/check-artifacts/

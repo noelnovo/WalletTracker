@@ -24,6 +24,8 @@ def github(path, token, data=None, method=None, binary=None, content_type=None):
     request = urllib.request.Request(url, data=body, headers=headers, method=method)
     try:
         with urllib.request.build_opener(NoRedirect()).open(request, timeout=120) as response:
+            if response.status == 204:
+                return None
             return json.load(response)
     except urllib.error.HTTPError as error:
         if error.code == 404 and method is None and data is None and binary is None:
@@ -63,6 +65,17 @@ def validate_artifact(receipt, tag, sha, directory):
     return apk
 
 
+def publication_token(env):
+    if env.get('GITHUB_RELEASE_READY') != 'true':
+        raise RuntimeError('GitLab publication requires the verified repository-scoped credential gate')
+    auth = vault_request('auth/gitlab-ci/login', {'role': 'wallettracker-android-publish-prod', 'jwt': env['VAULT_ID_TOKEN']})
+    values = vault_request(TOKEN_RECORD, token=auth['auth']['client_token'])['data']['data']
+    token = values.get('GITHUB_RELEASE_TOKEN')
+    if not token:
+        raise RuntimeError('Repository-scoped GitHub publication credential is missing')
+    return token
+
+
 def main():
     env = os.environ.copy()
     if env.get('GITHUB_RELEASE_READY') != 'true':
@@ -72,11 +85,7 @@ def main():
     directory = ROOT / 'delivery/artifacts'
     receipt = json.loads((directory / 'release-receipt.json').read_text())
     apk = validate_artifact(receipt, tag, env['CI_COMMIT_SHA'], directory)
-    auth = vault_request('auth/gitlab-ci/login', {'role': 'wallettracker-android-publish-prod', 'jwt': env['VAULT_ID_TOKEN']})
-    values = vault_request(TOKEN_RECORD, token=auth['auth']['client_token'])['data']['data']
-    token = values.get('GITHUB_RELEASE_TOKEN')
-    if not token:
-        raise RuntimeError('Repository-scoped GitHub publication credential is missing')
+    token = publication_token(env)
     if tag_commit(tag, token) != env['CI_COMMIT_SHA']:
         raise RuntimeError('GitHub release tag differs from the verified GitLab source')
     release = github('/releases/tags/' + urllib.parse.quote(tag, safe=''), token)

@@ -120,6 +120,11 @@ class ProductionSigningTests(unittest.TestCase):
         workflows = build_prod.ROOT / '.github/workflows'
         self.assertEqual(list(workflows.glob('*.yml')) + list(workflows.glob('*.yaml')), [])
 
+    def test_shared_android_image_installs_source_validation_tools(self):
+        pipeline = (build_prod.ROOT / '.gitlab/ci/pipeline.yml').read_text()
+        prerequisites = pipeline.split('  before_script:\n', 1)[1].split('\ndev-apk:', 1)[0]
+        self.assertIn('apt-get install -y --no-install-recommends git ca-certificates', prerequisites)
+
 
 if __name__ == '__main__':
     unittest.main()

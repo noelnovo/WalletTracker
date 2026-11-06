@@ -81,6 +81,10 @@ All Android builds share one resource group for the2GiB runner.
 - `publish-prod` is manual only on protected strict-semver release tags and only
   with `GITHUB_RELEASE_READY=true`. It rejects signing-validation receipts and
   requires live production API-v2. It never uses the server estate credential.
+- `publication-check` is a separate manual, credential-gated check-tag job. It
+  uploads only a tiny synthetic JSON asset to a new **draft**, verifies the digest,
+  and deletes only that unchanged job-owned draft. It never uploads an APK or
+  publishes anything, and refuses to overwrite an existing release or user work.
 
 The production tag rule is `v*`, Maintainer-only creation. Do not loosen JWT claims
 or tag protections to make a test pass. The distinct fine-grained GitHub credential

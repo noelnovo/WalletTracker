@@ -1,4 +1,5 @@
 import hashlib
+import io
 import json
 import os
 import pathlib
@@ -9,6 +10,13 @@ import publish_prod
 
 
 class ProductionPublicationTests(unittest.TestCase):
+    def test_successful_empty_delete_response_is_not_parsed_as_json(self):
+        response = io.BytesIO(b'')
+        response.status = 204
+        with patch.object(publish_prod.urllib.request, 'build_opener') as opener:
+            opener.return_value.open.return_value = response
+            self.assertIsNone(publish_prod.github('/releases/42', 'synthetic-token', method='DELETE'))
+
     def test_artifact_must_match_source_identity_configuration_and_checksum(self):
         pathlib.Path('/tmp/opencode').mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(dir='/tmp/opencode') as directory:
