@@ -26,7 +26,7 @@ def main():
                'asset_digest_verified': False, 'owned_draft_deleted': False}
     payload = json.dumps(receipt, sort_keys=True).encode()
     digest = 'sha256:' + hashlib.sha256(payload).hexdigest()
-    release = github('/releases', token, {'tag_name': tag, 'target_commitish': sha,
+    release = github('/releases', token, {'tag_name': tag,
         'name': 'WalletTracker CI upload check ' + tag, 'body': marker,
         'draft': True, 'prerelease': True, 'make_latest': 'false'})
     if release.get('draft') is not True or release.get('tag_name') != tag or not isinstance(release.get('id'), int):

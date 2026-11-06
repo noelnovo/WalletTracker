@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -29,7 +30,19 @@ def github(path, token, data=None, method=None, binary=None, content_type=None):
     except urllib.error.HTTPError as error:
         if error.code == 404 and method is None and data is None and binary is None:
             return None
-        raise RuntimeError('GitHub release request rejected (HTTP ' + str(error.code) + '); response withheld') from None
+        try:
+            message = str(json.loads(error.read(8192)).get('message', '')).lower()
+        except (ValueError, UnicodeError, AttributeError):
+            message = ''
+        category = ('integration-permission' if 'resource not accessible by integration' in message else
+                    'workflow-permission' if 'workflow' in message else
+                    'protected-ref' if 'protected' in message or 'ruleset' in message else
+                    'rate-limit' if 'rate limit' in message else 'unclassified')
+        request_id = error.headers.get('X-GitHub-Request-Id', '') if error.headers else ''
+        if not re.fullmatch('[A-Za-z0-9:-]{1,128}', request_id):
+            request_id = 'unavailable'
+        raise RuntimeError('GitHub release request rejected (HTTP ' + str(error.code)
+                           + '; category=' + category + '; request=' + request_id + '); response withheld') from None
 
 
 def tag_commit(tag, token):
@@ -86,7 +99,9 @@ def main():
     release = github('/releases/tags/' + urllib.parse.quote(tag, safe=''), token)
     if release is None:
         notes = (ROOT / ('delivery/RELEASE-NOTES-' + tag.removeprefix('v') + '.md')).read_text()
-        release = github('/releases', token, {'tag_name': tag, 'target_commitish': env['GITHUB_SHA'],
+        # The existing tag was already resolved/verified; never ask GITHUB_TOKEN
+        # to create a different target or modify workflow-bearing refs.
+        release = github('/releases', token, {'tag_name': tag,
             'name': 'WalletTracker ' + tag.removeprefix('v'), 'body': notes, 'draft': True, 'prerelease': False})
     files = [apk, directory / (apk.name + '.sha256'), directory / 'release-receipt.json']
     existing = {asset['name']: asset for asset in release.get('assets', [])}

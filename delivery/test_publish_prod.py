@@ -83,6 +83,7 @@ class ProductionPublicationTests(unittest.TestCase):
                         return None
                     if path == '/releases':
                         self.assertIs(data['draft'], True)
+                        self.assertNotIn('target_commitish', data)
                         return {'id': 42, 'draft': True, 'assets': [], 'upload_url': 'https://uploads.github.com/repos/noelnovo/WalletTracker/releases/42/assets{?name}'}
                     if binary is not None:
                         uploads.append(binary)

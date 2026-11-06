@@ -29,6 +29,7 @@ class PublicationCheckTests(unittest.TestCase):
                         return {'draft': False} if outcome == 'existing-release' else None
                     if path == '/releases':
                         self.assertIs(data['draft'], True)
+                        self.assertNotIn('target_commitish', data)
                         self.assertIs(data['prerelease'], True)
                         self.assertEqual(data['make_latest'], 'false')
                         state.update(created=True, body=data['body'])
