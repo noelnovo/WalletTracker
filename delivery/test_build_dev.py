@@ -1,10 +1,12 @@
 """Signing-path and credential-boundary tests; no Vault or Gradle calls."""
 import base64
 import json
+import hashlib
 import os
 import pathlib
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 import build_dev
 from ci_test_support import github_environment
@@ -30,9 +32,10 @@ class DevSigningTests(unittest.TestCase):
                 responses = [{'data': {'data': values}}]
                 with tempfile.TemporaryDirectory(dir='/tmp/opencode') as directory:
                     with patch.dict(os.environ, self.environment(), clear=True), \
-                         patch.object(build_dev, 'ROOT', pathlib.Path(directory)), \
-                         patch.object(build_dev, 'request', side_effect=responses) as request, \
-                         patch.object(build_dev.subprocess, 'run') as run:
+                          patch.object(build_dev, 'ROOT', pathlib.Path(directory)), \
+                          patch.object(build_dev, 'request', side_effect=responses) as request, \
+                          patch.object(build_dev.subprocess, 'run') as run, \
+                          patch.object(build_dev, 'verify_artifact') as verify:
                         build_dev.main()
                         request.assert_any_call('downops/data/apps/wallettracker/dev/mobile', token='synthetic-vault-token')
                         self.assertEqual(len(request.call_args_list), 1)
@@ -42,6 +45,7 @@ class DevSigningTests(unittest.TestCase):
                         self.assertNotIn('VAULT_TOKEN', env)
                         self.assertNotIn('ACTIONS_ID_TOKEN_REQUEST_TOKEN', env)
                         self.assertEqual(list(pathlib.Path(directory).iterdir()), [])
+                        verify.assert_called_once()
 
     def test_non_dev_identity_cannot_read_signing_secrets(self):
         for changes in ({'GITHUB_REF': 'refs/heads/main'}, {'GITHUB_REPOSITORY_ID': '1'},
@@ -73,6 +77,41 @@ class DevSigningTests(unittest.TestCase):
         workflow = (build_dev.ROOT / '.github/workflows/android.yml').read_text()
         self.assertIn("DEV_SIGNING_READY: 'true'", workflow)
         self.assertIn('role: wallettracker-mobile-ci-dev', workflow)
+
+    def test_actual_apk_must_match_dev_certificate_and_not_production(self):
+        certificate = b'synthetic-public-certificate'
+        expected = hashlib.sha256(certificate).hexdigest()
+        for outcome in ('valid', 'wrong-apk-signer', 'production-key'):
+            with self.subTest(outcome=outcome), tempfile.TemporaryDirectory(dir='/tmp/opencode') as directory:
+                root = pathlib.Path(directory)
+                apk = root / 'app/build/outputs/apk/debug/app-debug.apk'
+                apk.parent.mkdir(parents=True)
+                apk.write_bytes(b'synthetic-signed-apk')
+                digest = '0' * 64 if outcome == 'wrong-apk-signer' else expected
+                responses = [SimpleNamespace(returncode=0, stdout=certificate),
+                             SimpleNamespace(returncode=0, stdout=('Signer #1 certificate SHA-256 digest: ' + digest).encode())]
+                with patch.object(build_dev, 'ROOT', root), \
+                     patch.object(build_dev.subprocess, 'run', side_effect=responses) as run, \
+                     patch.object(build_dev, 'PRODUCTION_SIGNER', expected if outcome == 'production-key' else 'f' * 64), \
+                     patch('builtins.print'):
+                    env = self.environment(ANDROID_HOME=str(root / 'sdk'))
+                    env['DEV_KEYSTORE_PASSWORD'] = 'synthetic-store-password'
+                    if outcome == 'valid':
+                        build_dev.verify_artifact(root / 'dev.jks', {'KEY_ALIAS': 'dev'}, env)
+                    else:
+                        with self.assertRaises(RuntimeError):
+                            build_dev.verify_artifact(root / 'dev.jks', {'KEY_ALIAS': 'dev'}, env)
+                receipt_path = root / 'delivery/artifacts/dev-receipt.json'
+                if outcome == 'valid':
+                    receipt = json.loads(receipt_path.read_text())
+                    self.assertEqual(receipt['certificate_public_sha256'], expected)
+                    self.assertIs(receipt['signer_matches_dev_record'], True)
+                    self.assertIs(receipt['distinct_from_production'], True)
+                else:
+                    self.assertFalse(receipt_path.exists())
+                for call in run.call_args_list:
+                    self.assertNotIn('VAULT_TOKEN', call.kwargs['env'])
+                    self.assertNotIn('ACTIONS_ID_TOKEN_REQUEST_TOKEN', call.kwargs['env'])
 
 
 if __name__ == '__main__':

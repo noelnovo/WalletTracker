@@ -5,6 +5,7 @@ REPOSITORY = 'noelnovo/WalletTracker'
 REPOSITORY_ID = '909094292'
 OWNER_ID = '128699907'
 WORKFLOW = '.github/workflows/android.yml'
+PRODUCTION_SIGNER = '60b988457cca109d8f3a1f3ad288f95648f9938990aeedff0dfc5ed479952b61'
 
 
 def require_repository(env):

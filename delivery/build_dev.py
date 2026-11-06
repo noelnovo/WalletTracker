@@ -1,13 +1,15 @@
 """Stable dev signing using GitHub OIDC/Vault. No secrets in APK/argv/logs."""
 import base64
+import hashlib
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import tempfile
 import urllib.request
-from github_identity import require_dev, build_environment
+from github_identity import require_dev, build_environment, PRODUCTION_SIGNER
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 VAULT = 'https://vault.downops.win'
@@ -28,6 +30,36 @@ def request(path, data=None, token=None):
                                  headers=headers)
     with urllib.request.build_opener(NoRedirect()).open(req, timeout=30) as response:
         return json.load(response)
+
+
+def verify_artifact(keyfile, values, env):
+    """Check the actual APK against the loaded DEV certificate, not a debug fallback."""
+    child = build_environment(env)
+    certificate = subprocess.run(['keytool', '-exportcert', '-keystore', str(keyfile),
+        '-storepass:env', 'DEV_KEYSTORE_PASSWORD', '-alias', values['KEY_ALIAS']],
+        env=child, capture_output=True)
+    if certificate.returncode or not certificate.stdout:
+        raise RuntimeError('Development signing certificate could not be verified; diagnostics withheld')
+    expected = hashlib.sha256(certificate.stdout).hexdigest()
+    if expected == PRODUCTION_SIGNER:
+        raise RuntimeError('Production signing identity must never be used for a development APK')
+    apk = ROOT / 'app/build/outputs/apk/debug/app-debug.apk'
+    sdk = pathlib.Path(env['ANDROID_HOME']) / 'build-tools/36.0.0'
+    verification = subprocess.run([str(sdk / 'apksigner'), 'verify', '--print-certs', str(apk)],
+                                  env=child, capture_output=True)
+    digests = re.findall(r'Signer #\d+ certificate SHA-256 digest: ([a-fA-F0-9]{64})',
+                         verification.stdout.decode(errors='replace'))
+    if verification.returncode or len(digests) != 1 or digests[0].lower() != expected:
+        raise RuntimeError('Built development APK does not match the stable DEV signing certificate')
+    receipt = {'source_revision': env['GITHUB_SHA'], 'package': 'win.downops.wallettracker.debug',
+               'purpose': 'development', 'publishable': False,
+               'apk_sha256': hashlib.sha256(apk.read_bytes()).hexdigest(),
+               'certificate_public_sha256': expected,
+               'signer_matches_dev_record': True, 'distinct_from_production': True}
+    output = ROOT / 'delivery/artifacts'
+    output.mkdir(parents=True, exist_ok=True)
+    (output / 'dev-receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
+    print('Development APK signature and stable signer verified; receipt produced', flush=True)
 
 
 def main():
@@ -57,7 +89,9 @@ def main():
         subprocess.run(['sh', 'gradlew', '--no-daemon', '--max-workers=2',
                         '-Dorg.gradle.jvmargs=-Xmx1536m -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8',
                         '-Pkotlin.compiler.execution.strategy=in-process', 'testDebugUnitTest', 'assembleDebug'],
-                       cwd=ROOT, env=env, check=True)
+                        cwd=ROOT, env=env, check=True)
+        if directory is not None:
+            verify_artifact(keyfile, values, env)
     finally:
         if directory:
             shutil.rmtree(directory)

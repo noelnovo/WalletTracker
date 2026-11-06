@@ -11,13 +11,13 @@ import tempfile
 import urllib.request
 import urllib.error
 from build_dev import request as vault_request
-from github_identity import require_production, build_environment
+from github_identity import require_production, build_environment, PRODUCTION_SIGNER
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 PROD_RECORD = 'downops/data/apps/wallettracker/prod/mobile'
 PREVIOUS_APK = 'https://github.com/noelnovo/WalletTracker/releases/download/v2.2.2/app-release-unsigned-signed.apk'
 PREVIOUS_APK_SHA256 = 'a4fe553370782f0d046a3fe181acde210a1db23024e5f92774edfedfd8007b51'
-EXPECTED_SIGNER = '60b988457cca109d8f3a1f3ad288f95648f9938990aeedff0dfc5ed479952b61'
+EXPECTED_SIGNER = PRODUCTION_SIGNER
 
 
 def version():

@@ -92,7 +92,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: wallettracker-dev-${{ github.sha }}
-          path: app/build/outputs/apk/debug/*.apk
+          path: |
+            app/build/outputs/apk/debug/*.apk
+            delivery/artifacts/dev-receipt.json
           if-no-files-found: error
           retention-days: 14
 
