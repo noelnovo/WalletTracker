@@ -1,11 +1,4 @@
-stages: [test]
-
-contract:
-  stage: test
-  image: python:3.13-alpine
-  script:
-    - python3 delivery/verify_contract.py
-
-# APK compilation/unit tests run on GitHub's hosted Android toolchain. This
-# avoids a second SDK download/build on the capacity-constrained native runner.
-# No signing secrets, Kubernetes credentials, APK builds or releases in this job.
+# GitHub Actions is authoritative; GitLab is a passive repository backup.
+workflow:
+  rules:
+    - when: never
