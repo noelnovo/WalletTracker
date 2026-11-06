@@ -1,4 +1,4 @@
-"""Test GitLab's scoped GitHub upload path using an owned, disposable draft only."""
+"""Test GitHub Actions' built-in token upload using an owned disposable draft."""
 import hashlib
 import json
 import os
@@ -10,16 +10,14 @@ from publish_prod import github, publication_token, tag_commit
 
 def main():
     env = os.environ.copy()
-    if env.get('GITHUB_RELEASE_READY') != 'true':
-        raise RuntimeError('Publication validation is disabled until the scoped credential is verified')
     tag = validate_check_identity(env)
-    sha = env['CI_COMMIT_SHA']
-    job = env.get('CI_JOB_ID', '')
+    sha = env['GITHUB_SHA']
+    job = env.get('GITHUB_RUN_ID', '')
     if not re.fullmatch('[1-9][0-9]*', job):
-        raise RuntimeError('A verified GitLab job identity is required')
+        raise RuntimeError('A verified GitHub Actions run identity is required')
     token = publication_token(env)
     if tag_commit(tag, token) != sha:
-        raise RuntimeError('GitHub check tag differs from the verified GitLab source')
+        raise RuntimeError('GitHub check tag differs from the verified Actions source')
     if github('/releases/tags/' + urllib.parse.quote(tag, safe=''), token) is not None:
         raise RuntimeError('A release already exists for this test tag; refusing to overwrite it')
     marker = 'Nonpublishing WalletTracker CI upload check; job=' + job + '; source=' + sha
@@ -52,7 +50,7 @@ def main():
     directory = ROOT / 'delivery/check-artifacts'
     directory.mkdir(parents=True, exist_ok=True)
     (directory / 'publication-check-receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
-    print('GitLab scoped upload/digest/owned-draft cleanup verified; nothing published')
+    print('GitHub Actions upload/digest/owned-draft cleanup verified; nothing published')
 
 
 if __name__ == '__main__':

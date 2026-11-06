@@ -50,7 +50,7 @@ class PublicationCheckTests(unittest.TestCase):
                         return None
                     return {'draft': True, 'tag_name': tag,
                             'body': 'User modified' if outcome == 'user-changed-draft' else state['body']}
-                with patch.dict(os.environ, {'GITHUB_RELEASE_READY': 'true', 'CI_JOB_ID': '7', 'CI_COMMIT_SHA': 'a' * 40}, clear=True), \
+                with patch.dict(os.environ, {'GITHUB_RUN_ID': '7', 'GITHUB_SHA': 'a' * 40}, clear=True), \
                      patch.object(check_publication, 'ROOT', root), \
                      patch.object(check_publication, 'validate_check_identity', return_value=tag), \
                      patch.object(check_publication, 'publication_token', return_value='synthetic-token'), \

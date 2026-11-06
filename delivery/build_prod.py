@@ -11,6 +11,7 @@ import tempfile
 import urllib.request
 import urllib.error
 from build_dev import request as vault_request
+from github_identity import require_production, build_environment
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 PROD_RECORD = 'downops/data/apps/wallettracker/prod/mobile'
@@ -32,39 +33,34 @@ def command(args, env=None):
 
 
 def validate_identity(env):
+    require_production(env)
     tag = 'v' + version()
-    if env.get('CI_PROJECT_ID') != '31' or env.get('CI_COMMIT_TAG') != tag or env.get('CI_COMMIT_REF_PROTECTED') != 'true':
-        raise RuntimeError('Production signing requires project31 and an exact protected version tag')
-    sha = env.get('CI_COMMIT_SHA', '')
+    if env.get('GITHUB_REF_NAME') != tag or env.get('GITHUB_REF') != 'refs/tags/' + tag:
+        raise RuntimeError('Production signing requires the exact GitHub version tag')
+    sha = env.get('GITHUB_SHA', '')
     if not re.fullmatch('[a-f0-9]{40}', sha):
         raise RuntimeError('A verified source revision is required')
     command(['git', 'fetch', 'origin', 'main'], env)
     if command(['git', 'rev-parse', 'HEAD'], env) != sha:
         raise RuntimeError('Source revision mismatch')
     command(['git', 'merge-base', '--is-ancestor', sha, 'origin/main'], env)
-    mirror = command(['git', 'ls-remote', 'https://github.com/noelnovo/WalletTracker.git', 'refs/heads/main'], env)
-    if not mirror.split() or mirror.split()[0] != command(['git', 'rev-parse', 'origin/main'], env):
-        raise RuntimeError('GitHub main must match authoritative GitLab main before production signing')
     return tag
 
 
 def validate_check_identity(env):
     """A protected dev-source signing exercise, never a release authorization."""
-    tag = env.get('CI_COMMIT_TAG', '')
+    require_production(env)
+    tag = env.get('GITHUB_REF_NAME', '')
     expected = r'v' + re.escape(version()) + r'-ci-check(?:\.[1-9][0-9]*)?'
-    if (env.get('CI_PROJECT_ID') != '31' or env.get('CI_PROJECT_NAMESPACE') != 'downops'
-            or env.get('CI_COMMIT_REF_PROTECTED') != 'true' or not re.fullmatch(expected, tag)):
-        raise RuntimeError('Signing validation requires the exact protected project31 check tag')
-    sha = env.get('CI_COMMIT_SHA', '')
+    if not re.fullmatch(expected, tag) or env.get('GITHUB_REF') != 'refs/tags/' + tag:
+        raise RuntimeError('Signing validation requires the exact protected GitHub check tag')
+    sha = env.get('GITHUB_SHA', '')
     if not re.fullmatch('[a-f0-9]{40}', sha):
         raise RuntimeError('A verified check source revision is required')
     command(['git', 'fetch', 'origin', 'dev'], env)
     if command(['git', 'rev-parse', 'HEAD'], env) != sha:
         raise RuntimeError('Check source revision mismatch')
     command(['git', 'merge-base', '--is-ancestor', sha, 'origin/dev'], env)
-    mirror = command(['git', 'ls-remote', 'https://github.com/noelnovo/WalletTracker.git', 'refs/heads/dev'], env)
-    if not mirror.split() or mirror.split()[0] != command(['git', 'rev-parse', 'origin/dev'], env):
-        raise RuntimeError('Signing validation requires synchronized GitLab/GitHub dev')
     return tag
 
 
@@ -110,7 +106,9 @@ def main(*, validation=False):
     tag = validate_check_identity(env) if validation else validate_identity(env)
     # Build/sign before the write-freeze to minimize downtime; publication gates API-v2.
     verify_backend(require_v2=False)
-    token = vault_request('auth/gitlab-ci/login', {'role': 'wallettracker-android-ci-prod', 'jwt': env['VAULT_ID_TOKEN']})['auth']['client_token']
+    token = env.get('VAULT_TOKEN')
+    if not token:
+        raise RuntimeError('The scoped GitHub OIDC Vault login must succeed before production signing')
     values = vault_request(PROD_RECORD, token=token)['data']['data']
     if not all(values.get(key) for key in ('KEYSTORE_BASE64', 'KEYSTORE_PASSWORD', 'KEY_ALIAS')):
         raise RuntimeError('Canonical production keystore record is incomplete')
@@ -133,9 +131,9 @@ def main(*, validation=False):
         sdk = pathlib.Path(env['ANDROID_HOME']) / 'build-tools/36.0.0'
         signer(sdk / 'apksigner', previous, env)
         # Gradle must not inherit production signing credentials; signing is a separate step.
-        build_env = {key: value for key, value in env.items() if key not in ('PROD_KEYSTORE_PASSWORD', 'PROD_KEY_PASSWORD')}
-        subprocess.run(['sh', 'gradlew', '--no-daemon', '--max-workers=1',
-                        '-Dorg.gradle.jvmargs=-Xmx768m -XX:MaxMetaspaceSize=384m -Dfile.encoding=UTF-8',
+        build_env = build_environment(env)
+        subprocess.run(['sh', 'gradlew', '--no-daemon', '--max-workers=2',
+                        '-Dorg.gradle.jvmargs=-Xmx1536m -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8',
                         '-Pkotlin.compiler.execution.strategy=in-process', 'testDebugUnitTest', 'assembleRelease'],
                        cwd=ROOT, env=build_env, check=True)
         unsigned = ROOT / 'app/build/outputs/apk/release/app-release-unsigned.apk'
@@ -151,7 +149,7 @@ def main(*, validation=False):
         if not validation:
             (output / (target.name + '.sha256')).write_text(checksum + '  ' + target.name + '\n')
         receipt_name = 'production-check-receipt.json' if validation else 'release-receipt.json'
-        (output / receipt_name).write_text(json.dumps({'tag': tag, 'source_revision': env['CI_COMMIT_SHA'],
+        (output / receipt_name).write_text(json.dumps({'tag': tag, 'source_revision': env['GITHUB_SHA'],
             'package': 'win.downops.wallettracker', 'signer_matches_previous_release': True,
             'api_version': 2, 'registration_enabled': False, 'apk_sha256': checksum,
             'purpose': 'signing-validation' if validation else 'release',

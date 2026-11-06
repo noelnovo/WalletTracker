@@ -1,4 +1,4 @@
-"""Optional stable dev signing using scoped GitLab OIDC. No secrets in APK/argv/logs."""
+"""Stable dev signing using GitHub OIDC/Vault. No secrets in APK/argv/logs."""
 import base64
 import json
 import os
@@ -7,9 +7,10 @@ import shutil
 import subprocess
 import tempfile
 import urllib.request
+from github_identity import require_dev, build_environment
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-VAULT = 'https://vault.int.downops.win'
+VAULT = 'https://vault.downops.win'
 DEV_SIGNING_PATH = 'downops/data/apps/wallettracker/dev/mobile'
 
 
@@ -34,9 +35,10 @@ def main():
     directory = None
     try:
         if env.get('DEV_SIGNING_READY', 'false').lower() == 'true':
-            if env.get('CI_COMMIT_BRANCH') != 'dev' or env.get('CI_PROJECT_ID') != '31':
-                raise RuntimeError('Dev signing is restricted to project31/dev')
-            token = request('auth/gitlab-ci/login', {'role': 'wallettracker-android-ci-dev', 'jwt': env['VAULT_ID_TOKEN']})['auth']['client_token']
+            require_dev(env)
+            token = env.get('VAULT_TOKEN')
+            if not token:
+                raise RuntimeError('The scoped GitHub OIDC Vault login must succeed before signing')
             values = request(DEV_SIGNING_PATH, token=token)['data']['data']
             required = ('KEYSTORE_BASE64', 'KEYSTORE_PASSWORD', 'KEY_ALIAS')
             if not all(values.get(key) for key in required):
@@ -51,9 +53,9 @@ def main():
         else:
             print('DEV_SIGNING_READY=false: disposable debug signing; not an update-stable release', flush=True)
         # Neither signing mode passes the job's Vault OIDC credential to Gradle.
-        env.pop('VAULT_ID_TOKEN', None)
-        subprocess.run(['sh', 'gradlew', '--no-daemon', '--max-workers=1',
-                        '-Dorg.gradle.jvmargs=-Xmx768m -XX:MaxMetaspaceSize=384m -Dfile.encoding=UTF-8',
+        env = build_environment(env)
+        subprocess.run(['sh', 'gradlew', '--no-daemon', '--max-workers=2',
+                        '-Dorg.gradle.jvmargs=-Xmx1536m -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8',
                         '-Pkotlin.compiler.execution.strategy=in-process', 'testDebugUnitTest', 'assembleDebug'],
                        cwd=ROOT, env=env, check=True)
     finally:

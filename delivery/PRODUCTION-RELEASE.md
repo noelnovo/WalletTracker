@@ -1,113 +1,75 @@
-# WalletTracker 3 production release
+# WalletTracker production release — GitHub Actions
 
-Owner requested production promotion, a dev-to-main merge, GitHub release APK,
-and synchronized GitLab/GitHub repositories. The owner also approved **one fresh
-encrypted off-cluster MariaDB backup and restore verification**; no application
-backup schedule, Kubernetes backup Job or backup PVC may be added.
+GitHub is the authoritative source, workflow runner and APK download host.
+GitLab CI is disabled; its repositories are passive fast-forward backups.
+See `GITHUB-MIGRATION.md` and the exact `github-actions-vault-plan.json`.
 
-## Required order — no publication shortcut
+## CI authentication
 
-1. Recheck current operations receipts instead of repeating completed staging.
-   Separate production operator `run-prod` is available. Production records and
-   additive reader grants were staged and verified; recovery is closed.
-2. Verify canonical production Vault records against their current source values.
-   Preserve DB passwords, server RSA identity and the production APK signing key.
-   `production-signing-vault-plan.json` scopes the protected-tag APK reader.
-   If its public certificate differs from the verified v2.2.2 APK, stop; do not
-   sign a replacement, force uninstall, or silently use the dev key.
-3. Test the internal legacy phone-data upgrade, including invalid-row review,
-   encrypted recovery, account consent and non-destructive v2-cache schema upgrade.
-   This is not a CSV/file-import feature. Old plaintext token/client-key fields
-   are retired; existing biometric credentials support one authenticated upgrade
-   and are then replaced by the new wrapped refresh credential.
-4. Reconcile production-only commits into the release source without discarding
-   production image/state changes. Open reviewed dev-to-main release MRs on GitLab;
-   preserve long-lived dev. Mirror exact approved main/tag history to GitHub.
-5. On an exact protected Android version tag descended from synchronized main,
-   stage the signed APK with GitLab `prod-apk` before entering maintenance.
-   It checks source/mirror equality, previous release checksum and unchanged
-   signing identity. It does not publish; live API-v2 is gated at publication.
-6. Immediately before production schema changes, establish a fresh, verified
-   off-cluster recovery checkpoint and an approved write-freeze/cutover window.
-   The old static migration checkpoint is not evidence of a new backup. Do not
-   copy production data into dev, restart a stale writer, or automatically stamp
-   existing unversioned databases.
-7. Deliver the backend API-v2 upgrade through approved protected-tag/manual prod
-   GitLab/Argo flow. Keep registration disabled. Prevent divergent v1/v2 writers;
-   arrange the app update/cutover together. Verify actual Ready image/generation,
-   migration heads, retained data, HTTPS readiness and authenticated API semantics.
-8. The staged APK/checksum/receipt must remain unchanged after approval; the dev
-   key is never a production input. Shared2GB runner capacity must be sufficient
-   and isolated, not competing with heavy backend jobs.
-9. GitLab `publish-prod` uses a separate repository-scoped GitHub credential to
-   upload the **verified CI APK**, checksum and receipt to a draft GitHub release.
-   Gate live API-v2, exact source/tag identity, independent APK signature and all
-   uploaded digests before publishing to `noelnovo/WalletTracker`. Keep the estate
-    credential server-side; never copy it into CI. Real asset upload remains an
-    untested gate until successful. The distinct CI publication credential is
-    currently absent: `GITHUB_RELEASE_READY` defaults to false. Enable it only
-    after the repository-only credential is staged/verified at the reviewed
-    delivery path. Publishing is not accomplished by
-   building an unsigned APK or merely creating a tag.
+The original production PKCS12 signer and distinct dev signer remain unchanged
+in `downops/apps/wallettracker/{prod,dev}/mobile`. The GitHub workflow uses OIDC
+through the existing `github-actions` mount and public verified-TLS Vault URL.
+New exact GitHub roles require authorized administrator configuration; old
+GitLab signing tests are not proof that the new GitHub login works.
 
-The exact Android role plan is published on both hosts at
-`e274a8a89ae332a2530a37a4347ca2cf414ae171`; its protected signing/publication roles
-are administrator-configured and verified. Real protected-tag CI login remains
-untested. The manual checkpoint SQL is published at backend commit
-`ddd0b72d5bdf5bfc3c1f88164f4ffef032df38c9` and is not an approval.
-Production staging receipt:
-`/var/lib/wallettracker-production-operations/vault-stage-20261106T073611Z.json`.
-The existing PKCS12 signer is verified unchanged. No database recovery proof or
-release follows from staging alone. See backend `delivery/PRODUCTION-OPS-HANDOFF.md`.
-Retain old sources/grants until verified cutover and explicit retirement approval.
+`github-actions-status.json` keeps signing gated off until trust, roles and
+protections are verified. No recovery, self-grant, legacy broad-role workaround
+or key rotation is permitted. Preserve old records/grants until cutover and
+explicit retirement approval. Public production certificate SHA256:
+`60b988457cca109d8f3a1f3ad288f95648f9938990aeedff0dfc5ed479952b61`.
 
-## GitLab-only pipeline testing
+GitHub Releases uses job-scoped built-in `GITHUB_TOKEN` with `contents: write`.
+No external GitHub upload PAT, publication Vault secret or GitLab CI token is
+needed. Build/sign jobs cannot access the release job's token; Gradle receives
+no Vault/OIDC/Actions runtime/publication credentials.
 
-GitLab project31 `downops/wallet-tracker-android` owns all checks, builds, signing
-and publication. `.gitlab-ci.yml` includes `.gitlab/ci/pipeline.yml`. GitHub Actions
-workflows have been removed; GitHub remains the mirror and release-download host.
-All Android builds share one resource group for the2GiB runner.
+## Test without publishing
 
-- `dev-apk` uses the verified, distinct dev signing record with
-  `DEV_SIGNING_READY=true`. It remains manual unless capacity is explicitly ready.
-- `prod-signing-check` is manual on protected `v3.0.0-ci-check` tags (optional
-  positive numeric suffix for a new immutable test tag). It requires synchronized
-  GitLab/GitHub dev and exercises real production JWT login, signing, unchanged
-  public certificate and APK configuration. Only a **nonpublishable receipt** is
-  retained; the signed test APK is deleted. This is not a release or promotion.
-- `prod-apk` still requires an exact protected release version tag whose source
-  is on main, main mirror equality and the existing signer. No check tag can pass
-  its identity guard.
-- `publish-prod` is manual only on protected strict-semver release tags and only
-  with `GITHUB_RELEASE_READY=true`. It rejects signing-validation receipts and
-  requires live production API-v2. It never uses the server estate credential.
-- `publication-check` is a separate manual, credential-gated check-tag job. It
-  uploads only a tiny synthetic JSON asset to a new **draft**, verifies the digest,
-  and deletes only that unchanged job-owned draft. It never uploads an APK or
-  publishes anything, and refuses to overwrite an existing release or user work.
+- DEV uses its stable distinct key and uploads a GitHub Actions APK artifact.
+- A new immutable owner-protected `v3.0.0-ci-check.N` tag tests real production
+  login/signing/configuration and retains only a nonpublishable receipt; the
+  signed test APK is deleted.
+- The separate built-in-token publication check uploads a synthetic JSON asset
+  to one owned draft, verifies its digest and safely deletes that draft. It
+  never uploads an APK or publishes a release.
+- Secret-free checks and unsigned compilation may run before OIDC is ready;
+  skipped signing is never reported as a successful signing test.
 
-The production tag rule is `v*`, Maintainer-only creation. Do not loosen JWT claims
-or tag protections to make a test pass. The distinct fine-grained GitHub credential
-must be restricted to `noelnovo/WalletTracker`, Contents read/write and Metadata
-read, stored as `GITHUB_RELEASE_TOKEN` at
-`downops/apps/wallettracker/delivery/github-release`; never paste it into chat.
+## Production promotion order — no CI shortcut
 
-## Release notes to preserve
+1. Recheck signing/Vault equality, readiness and exact source revisions. CI-only
+   retirement commits on MAIN do not promote the application or its database.
+2. Verify legacy phone migration, invalid-row review, encrypted recovery,
+   destination-account consent, idempotency and biometric reauthentication.
+   No phone connection, file import or uninstall is required.
+3. Before production schema changes, coordinate the approved brief WalletTracker
+   write/DDL/account quiescence/read-lock window. Include InnoDB application and
+   Aria account/definition state. `--single-transaction` alone is insufficient.
+4. Take the approved one-off backup, encrypt before persistent storage and keep
+   ciphertext off-cluster. Restore-test in an isolated non-public non-DEV sandbox;
+   preserve complete data, accounts/grants and definitions. No schedules, backup
+   Kubernetes Jobs/PVCs or production data in DEV. Report paths, timestamps,
+   counts and equality/integrity booleans only.
+5. Only after fresh restore/write-freeze proof may the authorized operator approve
+   `wallettracker-api-v2` using the reviewed backend checkpoint schema. Old id1
+   and synthetic sandbox proofs are not fresh release approval. If writes resume,
+   revalidate complete private state at cutover and stop on mismatch. CI and
+   migrations must never approve themselves.
+6. Merge the reviewed application release without losing production-only changes,
+   verify GitHub MAIN and passive GitLab backup equality, then perform the backend
+   protected release/manual Argo sync. Preserve registration-disabled config and
+   prevent divergent v1/v2 writers. Verify image/revision, migration heads, data
+   preservation and actual Ready/API-v2 semantics. Never resume a stale writer
+   or restore an old snapshot after new writes without current-data transfer.
+7. An exact protected Android version tag on MAIN can build/sign the real release.
+   `publish-prod` requires the matching publishable receipt, checksums, exact tag,
+   unchanged signer and live production API-v2. It creates a draft, verifies all
+   asset digests, and only then publishes to GitHub Releases. A check-tag receipt
+   can never authorize it.
 
-- Update-in-place retains the production package/signing identity.
-- Legacy categories/expenses are moved only after choosing the destination wallet.
-- Invalid legacy entries remain editable review drafts, not discarded.
-- Retired statement/season data is retained in encrypted recovery, not reintroduced
-  as file import or silently treated as expenses.
-- Fingerprint-protected login upgrades old stored credentials after authentication;
-  an unavailable/enrollment-invalidated legacy key falls back to account password.
-- Offline changes sync when the wallet is unlocked; locked/restarted apps require
-  unlock, rather than persisting an unattended biometric bypass credential.
+## Existing backend boundary
 
-## Remaining backend review
-
-The current dev backend still has provisioning/root DB authority and plaintext
-tenant-credential/legacy-RSA columns in its main database. This is documented in
-the backend notes, not silently claimed hardened. Production acceptance must
-address least-privilege/envelope-key work or explicitly review those boundaries
-before release. An APK download alone does not complete a safe server migration.
+The existing backend still has provisioning/root DB authority and plaintext
+tenant-credential/legacy RSA columns. Do not claim those boundaries are hardened;
+retain their review before production acceptance. Backend GitOps source and
+security-role migration must preserve MAIN's required checks and manual PROD sync.

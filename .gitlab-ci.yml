@@ -1,3 +1,4 @@
-# GitLab's default entry point; pipeline implementation is not kept in the root.
-include:
-  - local: /.gitlab/ci/pipeline.yml
+# GitHub Actions is authoritative; GitLab is a passive repository backup.
+workflow:
+  rules:
+    - when: never

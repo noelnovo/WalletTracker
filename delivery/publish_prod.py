@@ -1,4 +1,4 @@
-"""Publish the verified GitLab APK to GitHub using a separate repo-scoped identity."""
+"""Publish the verified GitHub Actions APK using its job-scoped GITHUB_TOKEN."""
 import hashlib
 import json
 import os
@@ -6,18 +6,17 @@ import pathlib
 import urllib.error
 import urllib.parse
 import urllib.request
-from build_dev import NoRedirect, request as vault_request
+from build_dev import NoRedirect
 from build_prod import ROOT, validate_identity, verify_backend
 
 REPOSITORY = 'noelnovo/WalletTracker'
 API = 'https://api.github.com/repos/' + REPOSITORY
-TOKEN_RECORD = 'downops/data/apps/wallettracker/delivery/github-release'
 
 
 def github(path, token, data=None, method=None, binary=None, content_type=None):
     url = path if path.startswith('https://uploads.github.com/') else API + path
     headers = {'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.github+json',
-               'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'WalletTracker-GitLab-Release'}
+               'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'WalletTracker-GitHub-Actions-Release'}
     body = binary if binary is not None else (json.dumps(data).encode() if data is not None else None)
     if body is not None:
         headers['Content-Type'] = content_type or 'application/json'
@@ -51,7 +50,7 @@ def validate_artifact(receipt, tag, sha, directory):
     if receipt.get('purpose') != 'release' or receipt.get('publishable') is not True:
         raise RuntimeError('A signing-validation artifact can never authorize publication')
     if receipt.get('tag') != tag or receipt.get('source_revision') != sha:
-        raise RuntimeError('APK receipt does not match the protected release source')
+        raise RuntimeError('APK receipt does not match the protected GitHub release source')
     if receipt.get('package') != 'win.downops.wallettracker' or receipt.get('signer_matches_previous_release') is not True:
         raise RuntimeError('Production APK signing identity is not verified')
     if receipt.get('api_version') != 2 or receipt.get('registration_enabled') is not False:
@@ -66,32 +65,28 @@ def validate_artifact(receipt, tag, sha, directory):
 
 
 def publication_token(env):
-    if env.get('GITHUB_RELEASE_READY') != 'true':
-        raise RuntimeError('GitLab publication requires the verified repository-scoped credential gate')
-    auth = vault_request('auth/gitlab-ci/login', {'role': 'wallettracker-android-publish-prod', 'jwt': env['VAULT_ID_TOKEN']})
-    values = vault_request(TOKEN_RECORD, token=auth['auth']['client_token'])['data']['data']
-    token = values.get('GITHUB_RELEASE_TOKEN')
+    from github_identity import require_repository
+    require_repository(env)
+    token = env.get('GH_TOKEN') or env.get('GITHUB_TOKEN')
     if not token:
-        raise RuntimeError('Repository-scoped GitHub publication credential is missing')
+        raise RuntimeError('A job-scoped GitHub Actions token is required for publication')
     return token
 
 
 def main():
     env = os.environ.copy()
-    if env.get('GITHUB_RELEASE_READY') != 'true':
-        raise RuntimeError('GitLab publication requires the verified repository-scoped credential gate')
     tag = validate_identity(env)
     verify_backend()
     directory = ROOT / 'delivery/artifacts'
     receipt = json.loads((directory / 'release-receipt.json').read_text())
-    apk = validate_artifact(receipt, tag, env['CI_COMMIT_SHA'], directory)
+    apk = validate_artifact(receipt, tag, env['GITHUB_SHA'], directory)
     token = publication_token(env)
-    if tag_commit(tag, token) != env['CI_COMMIT_SHA']:
-        raise RuntimeError('GitHub release tag differs from the verified GitLab source')
+    if tag_commit(tag, token) != env['GITHUB_SHA']:
+        raise RuntimeError('GitHub release tag differs from the verified Actions source')
     release = github('/releases/tags/' + urllib.parse.quote(tag, safe=''), token)
     if release is None:
         notes = (ROOT / ('delivery/RELEASE-NOTES-' + tag.removeprefix('v') + '.md')).read_text()
-        release = github('/releases', token, {'tag_name': tag, 'target_commitish': env['CI_COMMIT_SHA'],
+        release = github('/releases', token, {'tag_name': tag, 'target_commitish': env['GITHUB_SHA'],
             'name': 'WalletTracker ' + tag.removeprefix('v'), 'body': notes, 'draft': True, 'prerelease': False})
     files = [apk, directory / (apk.name + '.sha256'), directory / 'release-receipt.json']
     existing = {asset['name']: asset for asset in release.get('assets', [])}

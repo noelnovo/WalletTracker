@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 import publish_prod
+from ci_test_support import github_environment
 
 
 class ProductionPublicationTests(unittest.TestCase):
@@ -46,12 +47,13 @@ class ProductionPublicationTests(unittest.TestCase):
         with patch.object(publish_prod, 'github', side_effect=[{'object': {'type': 'tag', 'sha': 'b' * 40}}, {'object': {'type': 'commit', 'sha': 'a' * 40}}]):
             self.assertEqual(publish_prod.tag_commit('v3.0.0', 'synthetic-token'), 'a' * 40)
 
-    def test_publication_credential_is_not_the_signing_record(self):
-        self.assertEqual(publish_prod.TOKEN_RECORD, 'downops/data/apps/wallettracker/delivery/github-release')
-        self.assertNotIn('/prod/mobile', publish_prod.TOKEN_RECORD)
+    def test_publication_uses_builtin_token_without_vault_dependency(self):
+        token = 'synthetic-actions-token'
+        self.assertEqual(publish_prod.publication_token(github_environment(GH_TOKEN=token)), token)
+        self.assertFalse(hasattr(publish_prod, 'vault_request'))
 
     def test_publication_is_inactive_without_verified_credential_gate(self):
-        with patch.dict(os.environ, {}, clear=True), patch.object(publish_prod, 'vault_request') as request:
+        with patch.dict(os.environ, {}, clear=True), patch.object(publish_prod, 'publication_token') as request:
             with self.assertRaises(RuntimeError):
                 publish_prod.main()
             request.assert_not_called()
@@ -90,10 +92,9 @@ class ProductionPublicationTests(unittest.TestCase):
                     publications.append(path)
                     return {'html_url': 'https://github.com/noelnovo/WalletTracker/releases/tag/v3.0.0'}
                 with patch.object(publish_prod, 'ROOT', root), \
-                     patch.dict(os.environ, {'GITHUB_RELEASE_READY': 'true', 'CI_COMMIT_SHA': 'a' * 40, 'VAULT_ID_TOKEN': 'synthetic-jwt'}, clear=True), \
+                     patch.dict(os.environ, github_environment(GH_TOKEN='synthetic-actions-token'), clear=True), \
                      patch.object(publish_prod, 'validate_identity', return_value='v3.0.0'), \
                      patch.object(publish_prod, 'verify_backend'), \
-                     patch.object(publish_prod, 'vault_request', side_effect=[{'auth': {'client_token': 'synthetic-token'}}, {'data': {'data': {'GITHUB_RELEASE_TOKEN': 'synthetic-publication-token'}}}]), \
                      patch.object(publish_prod, 'github', side_effect=github), \
                      patch('builtins.print'):
                     if bad_digest:
