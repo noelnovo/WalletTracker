@@ -47,6 +47,8 @@ class GitHubIdentityTests(unittest.TestCase):
             self.assertEqual(claims['repository_owner_id'], '128699907')
             self.assertNotIn('ref_protected', claims)
             self.assertNotIn('project_id', claims)
+            self.assertEqual(settings['bound_subject'],
+                             'repo:noelnovo@128699907/WalletTracker@909094292:environment:' + claims['environment'])
             if role.endswith('-dev'):
                 self.assertEqual(claims['environment'], 'development')
                 self.assertEqual(claims['ref'], 'refs/heads/dev')

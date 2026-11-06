@@ -1,4 +1,4 @@
 {
-  "vault_signing_ready": true,
-  "reason": "Owner confirmed applying the exact UI role bodies after checking GitHub issuer/discovery. Enable real GitHub dev and protected nonpublishing production tests; any failed auth/signature gate must stop. No deployment or public production release is authorized by this flag alone."
+  "vault_signing_ready": false,
+  "reason": "Actual GitHub login rejected the old name-only subject. GitHub API confirms immutable subject prefix with owner/repository IDs. Keep signing closed until the corrected complete role bodies are applied and verified; do not broaden policies or rotate keys."
 }

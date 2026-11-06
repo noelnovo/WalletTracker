@@ -3,6 +3,13 @@
 No signing key, password, GitHub PAT or root/recovery token is needed here.
 The role JSON files contain only public claim bindings and policy names.
 
+GitHub API verification reports `use_immutable_subject=true` and prefix
+`repo:noelnovo@128699907/WalletTracker@909094292`. The corrected JSON bodies
+include those IDs in `bound_subject`. The earlier name-only format fails with
+`invalid subject (sub) claim`. Updating this binding changes no policy or key.
+Use the complete corrected body, not a partial single-field write that might
+reset omitted role settings.
+
 1. Sign in to `https://vault.downops.win/ui/` using your normal administrator
    authentication. Being a Kubernetes administrator does not log the Vault CLI in.
 2. Open **Access → Auth Methods** and look for the existing `github-actions/`

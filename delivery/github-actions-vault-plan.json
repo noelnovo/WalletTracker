@@ -10,6 +10,7 @@
   "workflow": "noelnovo/WalletTracker/.github/workflows/android.yml",
   "repository_id": "909094292",
   "repository_owner_id": "128699907",
+  "verified_immutable_subject_prefix": "repo:noelnovo@128699907/WalletTracker@909094292",
   "preserve_old_roles_policies_and_signing_keys": true,
   "no_recovery_or_operator_self_grant": true,
   "roles": {
@@ -17,7 +18,7 @@
       "role_type": "jwt",
       "user_claim": "sub",
       "bound_audiences": ["https://vault.downops.win"],
-      "bound_subject": "repo:noelnovo/WalletTracker:environment:development",
+      "bound_subject": "repo:noelnovo@128699907/WalletTracker@909094292:environment:development",
       "bound_claims_type": "glob",
       "bound_claims": {
         "repository_id": "909094292",
@@ -39,7 +40,7 @@
       "role_type": "jwt",
       "user_claim": "sub",
       "bound_audiences": ["https://vault.downops.win"],
-      "bound_subject": "repo:noelnovo/WalletTracker:environment:production",
+      "bound_subject": "repo:noelnovo@128699907/WalletTracker@909094292:environment:production",
       "bound_claims_type": "glob",
       "bound_claims": {
         "repository_id": "909094292",
