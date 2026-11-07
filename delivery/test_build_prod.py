@@ -13,6 +13,10 @@ from ci_test_support import github_environment
 
 
 class ProductionSigningTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        pathlib.Path('/tmp/opencode').mkdir(parents=True, exist_ok=True)
+
     def environment(self, **changes):
         return github_environment(**changes)
 
@@ -121,6 +125,9 @@ class ProductionSigningTests(unittest.TestCase):
             self.assertEqual(receipt['purpose'], 'signing-validation')
             self.assertIs(receipt['publishable'], False)
             self.assertIs(receipt['signed_apk_retained'], False)
+            self.assertIs(receipt['registration_ui_available'], True)
+            self.assertEqual(receipt['registration_authority'], 'backend')
+            self.assertNotIn('registration_enabled', receipt)
 
     def test_gitlab_is_passive_backup_only(self):
         pipeline = (build_prod.ROOT / '.gitlab-ci.yml').read_text()
@@ -134,6 +141,32 @@ class ProductionSigningTests(unittest.TestCase):
         self.assertIn('fetch-depth: 0', workflow)
         self.assertNotIn('persist-credentials: true', workflow)
         self.assertEqual(workflow.count('uses: android-actions/setup-android@v3'), workflow.count('packages: platform-tools'))
+
+    def test_release_configuration_describes_ui_not_server_permission(self):
+        valid = '\n'.join(('String API_BASE_URL = "https://api.downops.win";',
+                           'String API_VERSION = "2";', 'boolean REGISTRATION_UI_AVAILABLE = true;',
+                           'String SIGN_SECRET = "";'))
+        with tempfile.TemporaryDirectory(dir='/tmp/opencode') as directory:
+            root = pathlib.Path(directory)
+            config = root / 'app/build/generated/source/buildConfig/release/win/downops/wallettracker/BuildConfig.java'
+            config.parent.mkdir(parents=True)
+            with patch.object(build_prod, 'ROOT', root), patch.object(build_prod, 'command', return_value="package: name='win.downops.wallettracker'"):
+                config.write_text(valid)
+                build_prod.validate_built_configuration(root / 'sdk', root / 'unsigned.apk', {})
+                for text in (valid.replace('REGISTRATION_UI_AVAILABLE = true', 'REGISTRATION_UI_AVAILABLE = false'),
+                             valid.replace('REGISTRATION_UI_AVAILABLE = true', 'ALLOW_REGISTER = false'),
+                             valid.replace('API_VERSION = "2"', 'API_VERSION = "1"'),
+                             valid.replace('SIGN_SECRET = ""', 'SIGN_SECRET = "synthetic-not-empty"'),
+                             valid.replace('https://api.downops.win', 'https://wallettracker-dev.int.downops.win')):
+                    with self.subTest(text=text), self.assertRaises(RuntimeError):
+                        config.write_text(text)
+                        build_prod.validate_built_configuration(root / 'sdk', root / 'unsigned.apk', {})
+
+    def test_registration_action_is_not_gated_by_the_build_variant(self):
+        activity = (build_prod.ROOT / 'app/src/main/java/win/downops/wallettracker/v2/WalletActivity.kt').read_text()
+        self.assertIn('body.addView(button("Create account", false)', activity)
+        self.assertNotIn('BuildConfig.ALLOW_REGISTER', activity)
+        self.assertNotIn('if (BuildConfig.REGISTRATION_UI_AVAILABLE)', activity)
 
 
 if __name__ == '__main__':

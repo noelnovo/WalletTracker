@@ -238,7 +238,8 @@ class WalletActivity : AppCompatActivity() {
         body.addView(signInActions)
         if (biometricAvailable && model.wrappedRefresh != null) body.addView(button("Unlock", false) { unlock() }.apply { setIconResource(R.drawable.ic_fingerprint) })
         else if (biometricAvailable && legacyCredentials != null) body.addView(button("Unlock", false) { unlockLegacy(legacyCredentials) }.apply { setIconResource(R.drawable.ic_fingerprint) })
-        if (BuildConfig.ALLOW_REGISTER) body.addView(button("Create account", false) {
+        // Always expose the flow. The server authorizes or rejects registration.
+        body.addView(button("Create account", false) {
             if (username.text.toString().trim().length !in 3..128) { username.error = "3–128 characters"; return@button }
             if (password.text.toString().length !in 12..1024) { password.error = "12–1024 characters"; return@button }
             task {

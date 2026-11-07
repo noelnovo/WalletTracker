@@ -96,9 +96,9 @@ def validate_built_configuration(sdk, apk, env):
         raise RuntimeError('Production build configuration could not be verified')
     text = configs[0].read_text()
     required = ('String API_BASE_URL = "https://api.downops.win";', 'String API_VERSION = "2";',
-                'boolean ALLOW_REGISTER = false;', 'String SIGN_SECRET = "";')
-    if not all(value in text for value in required):
-        raise RuntimeError('Production API, registration or embedded-secret configuration is unsafe')
+                'boolean REGISTRATION_UI_AVAILABLE = true;', 'String SIGN_SECRET = "";')
+    if not all(value in text for value in required) or 'ALLOW_REGISTER' in text:
+        raise RuntimeError('Production API, registration UI or embedded-secret configuration is unsafe')
 
 
 def main(*, validation=False):
@@ -149,7 +149,8 @@ def main(*, validation=False):
         (output / receipt_name).write_text(json.dumps({'tag': tag, 'source_revision': env['GITHUB_SHA'],
             'signing_record_path': PROD_RECORD,
             'package': 'win.downops.wallettracker', 'signer_matches_previous_release': True,
-            'api_version': 2, 'registration_enabled': False, 'apk_sha256': checksum,
+            'api_version': 2, 'registration_ui_available': True,
+            'registration_authority': 'backend', 'apk_sha256': checksum,
             'purpose': 'signing-validation' if validation else 'release',
             'publishable': not validation, 'signed_apk_retained': not validation}, indent=2) + '\n')
         print('Production signing validation passed; test APK is not retained or publishable' if validation

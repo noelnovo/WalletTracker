@@ -26,11 +26,14 @@ class ProductionPublicationTests(unittest.TestCase):
             (directory / 'WalletTracker-v3.0.0.apk').write_bytes(payload)
             (directory / 'WalletTracker-v3.0.0.apk.sha256').write_text(hashlib.sha256(payload).hexdigest() + '  WalletTracker-v3.0.0.apk\n')
             receipt = {'tag': 'v3.0.0', 'source_revision': 'a' * 40, 'package': 'win.downops.wallettracker',
-                       'signer_matches_previous_release': True, 'api_version': 2, 'registration_enabled': False,
+                       'signer_matches_previous_release': True, 'api_version': 2,
+                       'registration_ui_available': True, 'registration_authority': 'backend',
                        'apk_sha256': hashlib.sha256(payload).hexdigest(), 'purpose': 'release', 'publishable': True}
             self.assertTrue(publish_prod.validate_artifact(receipt, 'v3.0.0', 'a' * 40, directory).is_file())
             for change in ({'source_revision': 'b' * 40}, {'signer_matches_previous_release': False},
-                           {'registration_enabled': True}, {'package': 'win.downops.wallettracker.debug'}, {'apk_sha256': '0' * 64},
+                           {'registration_ui_available': False}, {'registration_authority': 'apk'},
+                           {'registration_enabled': False}, {'registration_enabled': True},
+                           {'package': 'win.downops.wallettracker.debug'}, {'apk_sha256': '0' * 64},
                            {'purpose': 'signing-validation'}, {'publishable': False}):
                 with self.subTest(change=change), self.assertRaises(RuntimeError):
                     publish_prod.validate_artifact(dict(receipt, **change), 'v3.0.0', 'a' * 40, directory)
@@ -72,7 +75,8 @@ class ProductionPublicationTests(unittest.TestCase):
                 (artifacts / (apk.name + '.sha256')).write_text(digest + '  ' + apk.name + '\n')
                 receipt = {'tag': 'v3.0.0', 'source_revision': 'a' * 40,
                            'package': 'win.downops.wallettracker', 'signer_matches_previous_release': True,
-                           'api_version': 2, 'registration_enabled': False, 'apk_sha256': digest,
+                           'api_version': 2, 'registration_ui_available': True,
+                           'registration_authority': 'backend', 'apk_sha256': digest,
                            'purpose': 'release', 'publishable': True}
                 (artifacts / 'release-receipt.json').write_text(json.dumps(receipt))
                 uploads, publications = [], []

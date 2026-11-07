@@ -66,7 +66,8 @@ def validate_artifact(receipt, tag, sha, directory):
         raise RuntimeError('APK receipt does not match the protected GitHub release source')
     if receipt.get('package') != 'win.downops.wallettracker' or receipt.get('signer_matches_previous_release') is not True:
         raise RuntimeError('Production APK signing identity is not verified')
-    if receipt.get('api_version') != 2 or receipt.get('registration_enabled') is not False:
+    if (receipt.get('api_version') != 2 or receipt.get('registration_ui_available') is not True
+            or receipt.get('registration_authority') != 'backend' or 'registration_enabled' in receipt):
         raise RuntimeError('Production APK configuration mismatch')
     apk = directory / ('WalletTracker-' + tag + '.apk')
     if hashlib.sha256(apk.read_bytes()).hexdigest() != receipt.get('apk_sha256'):

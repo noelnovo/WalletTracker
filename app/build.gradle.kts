@@ -21,6 +21,8 @@ android {
         targetSdk = 36
         versionCode = majorVersion * 10000 + minorVersion * 100 + patchVersion
         versionName = "$majorVersion.$minorVersion.$patchVersion"
+        // Compiled UI capability only; authorization always belongs to the backend.
+        buildConfigField("boolean", "REGISTRATION_UI_AVAILABLE", "true")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -47,7 +49,6 @@ android {
             if (!devKeyFile.isNullOrBlank()) signingConfig = signingConfigs.getByName("development")
             buildConfigField("String", "API_BASE_URL", "\"https://wallettracker-dev.int.downops.win\"")
             buildConfigField("String", "API_VERSION", "\"2\"")
-            buildConfigField("boolean", "ALLOW_REGISTER", "true")
             buildConfigField("String", "SIGN_SECRET", "\"\"") // Legacy v1 code only; never used by v2.
             isDebuggable = true
             applicationIdSuffix = ".debug"
@@ -59,7 +60,6 @@ android {
 
           buildConfigField("String", "API_BASE_URL", "\"$apiBaseUrl\"")
           buildConfigField("String", "API_VERSION", "\"2\"")
-          buildConfigField("boolean", "ALLOW_REGISTER", "false")
           buildConfigField("String", "SIGN_SECRET", "\"\"")
           isMinifyEnabled = true
           isShrinkResources = true
