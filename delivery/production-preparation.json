@@ -1,0 +1,57 @@
+{
+  "status": "GITHUB_CI_AND_SIGNING_VERIFIED_PRODUCTION_APPLICATION_NOT_PROMOTED",
+  "android_version": "3.0.0",
+  "backend_version": "2.0.0",
+  "owner_authorization": {
+    "authoritative_ci_source_and_apk_host": "GitHub",
+    "gitlab_role": "passive backup; CI globally disabled",
+    "production_promotion": true,
+    "dev_to_main_merge_and_dual_host_sync": true,
+    "github_signed_apk_release": true,
+    "one_off_encrypted_off_cluster_backup_and_restore": true,
+    "brief_wallettracker_write_freeze_read_lock": true,
+    "phone_connection_required": false
+  },
+  "local_verification": {
+    "debug_build_and_jvm_tests": "passed",
+    "optimized_unsigned_release_and_lint_vital": "passed",
+    "release_package_debug_api_registration_configuration": "verified",
+    "isolated_emulator_instrumentation": "OK (15 tests); device-dependent biometric/live-network assumptions may skip",
+    "legacy_upgrade_cases": "6 passed after SQLite PRAGMA query fix",
+    "production_signing_certificate_expected_public_sha256": "60b988457cca109d8f3a1f3ad288f95648f9938990aeedff0dfc5ed479952b61",
+    "previous_release_apk_sha256_verified": "a4fe553370782f0d046a3fe181acde210a1db23024e5f92774edfedfd8007b51"
+  },
+  "operations_preflight": {
+    "protected_receipt": "/var/lib/wallettracker-production-operations/vault-stage-20261106T073611Z.json",
+    "prod_dev_api_and_ssh_healthy": true,
+    "production_operator_wrapper_authority": "separate run-prod available; default run remains DEV-only",
+    "production_vault_values_and_signing_identity": "complete staged equality and existing PKCS12 signer verified; unchanged",
+    "android_production_roles": "Owner applied corrected immutable-subject roles; real GitHub DEV and PROD signing checks passed",
+    "github_signing_verified_source": "b242d77a983908b8848bfcb2fbd66bb82596c164",
+    "github_dev_verified_run": 42318807930,
+    "github_prod_nonpublishing_verified_run": 42318978395,
+    "github_dev_public_apk_sha256": "f7abad27690b7a4fe64552e47ce7ce151025577974952f00a962c7484913ac7b",
+    "sandbox_encryption_readiness_receipt": "/var/lib/wallettracker-production-operations/readiness-20261106T092637Z/readiness-receipt.json",
+    "synthetic_controller_receipts": "/var/lib/wallettracker-production-operations/controller-review-20261106/unit-{a,b,c}-receipt.json",
+    "synthetic_controller_tests": "success, comparison/cleanup, contention, dump/receiver failure, lease expiry, tamper and real 115-second watchdog passed",
+    "synthetic_watchdog_release_seconds": 117.453,
+    "production_capture_adapter": "pending production-safe target/ownership review; synthetic tests do not authorize production capture",
+    "fresh_backup_or_restore_started": false,
+    "production_writer": "legacy v1 active",
+    "production_main_alembic_head": "f19f76872f76",
+    "production_tenant_alembic_head": "c34bd55b3ea7",
+    "publication_write_identity": "built-in GITHUB_TOKEN draft upload/digest/cleanup verified; no external upload PAT required",
+    "automated_ci_publication": "GitHub-owned; release requires protected MAIN tag, signing gate, receipt and live API-v2",
+    "github_actions": "new workflow restored; legacy default-branch workflows retired by CI-only commits",
+    "production_signing_validation": "protected ci-check job is nonpublishable, retains receipt only, and does not replace release gates"
+  },
+  "safety": {
+    "main_ci_only_retirement": "workflow control files only; no application or k8s content promoted",
+    "production_main_merged": false,
+    "production_application_or_database_changed": false,
+    "production_signer_rotated": false,
+    "production_apk_signed_or_published": false,
+    "new_backup_schedule_or_pvc": false,
+    "security_gates_bypassed": false
+  }
+}

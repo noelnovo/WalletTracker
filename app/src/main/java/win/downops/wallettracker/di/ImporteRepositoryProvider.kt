@@ -21,7 +21,6 @@ class ImporteRepositoryProvider @Inject constructor(
     override suspend fun getBySeasonId(seasonId: Long): AppResult<List<Importe>> = repo().getBySeasonId(seasonId)
     override suspend fun getById(importeId: Long): AppResult<Importe?> = repo().getById(importeId)
     override suspend fun create(importe: Importe): AppResult<Importe?> = repo().create(importe)
-    override suspend fun createAll(importes: List<Importe>): AppResult<Unit> = repo().createAll(importes)
     override suspend fun deleteById(importeId: Long): AppResult<Unit> = repo().deleteById(importeId)
     override suspend fun deleteBySeasonId(seasonId: Long): AppResult<Unit> = repo().deleteBySeasonId(seasonId)
 }

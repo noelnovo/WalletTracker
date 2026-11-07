@@ -1,0 +1,22 @@
+{
+  "role_type": "jwt",
+  "user_claim": "sub",
+  "bound_audiences": ["https://vault.downops.win"],
+  "bound_subject": "repo:noelnovo@128699907/WalletTracker@909094292:environment:development",
+  "bound_claims_type": "glob",
+  "bound_claims": {
+    "repository_id": "909094292",
+    "repository_owner_id": "128699907",
+    "repository": "noelnovo/WalletTracker",
+    "environment": "development",
+    "ref": "refs/heads/dev",
+    "ref_type": "branch",
+    "workflow_ref": "noelnovo/WalletTracker/.github/workflows/android.yml@refs/heads/dev",
+    "event_name": ["push", "workflow_dispatch"]
+  },
+  "token_policies": ["wallettracker-android-ci-dev"],
+  "token_no_default_policy": true,
+  "token_type": "batch",
+  "token_ttl": 900,
+  "token_max_ttl": 900
+}

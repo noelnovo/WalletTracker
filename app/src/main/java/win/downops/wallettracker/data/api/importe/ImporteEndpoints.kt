@@ -32,13 +32,6 @@ interface ImporteEndpoints {
         @Body body: CipheredRequest
     ): Response<BaseResponse<CipheredResponse>>
 
-    @POST("/api/v${BuildConfig.API_VERSION}/Importe/all")
-    suspend fun createAll(
-        @Header("Authorization") token: String,
-        @Header("Signature") cipher: String,
-        @Body body: CipheredRequest
-    ): Response<BaseResponse<Unit>>
-
     @POST("/api/v${BuildConfig.API_VERSION}/Importe/delete")
     suspend fun deleteById(
         @Header("Authorization") token: String,

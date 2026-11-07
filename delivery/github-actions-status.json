@@ -1,4 +1,4 @@
 {
-  "vault_signing_ready": false,
-  "reason": "Enable by reviewed source commit only after an authorized administrator verifies the exact GitHub OIDC roles, policies, tag rules and protected environments."
+  "vault_signing_ready": true,
+  "reason": "Owner confirmed applying the corrected complete role bodies with GitHub's API-verified immutable subject prefix. Run new real signing tests; any auth/signature failure stops the workflow. Existing policies and signing keys are unchanged. No production deployment or public release is implied by this test gate."
 }

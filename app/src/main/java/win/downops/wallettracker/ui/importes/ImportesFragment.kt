@@ -63,10 +63,6 @@ class ImportesFragment : Fragment() {
             override fun onNothingSelected(parent: AdapterView<*>) {}
         }
 
-        binding.btnImportCsv.setOnClickListener {
-            findNavController().navigate(R.id.nav_importsheet)
-        }
-
         binding.btnEmptySeason.setOnClickListener {
             val selectedSeasonId = viewModel.selectedMonthId.value ?: return@setOnClickListener
 

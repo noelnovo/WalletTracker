@@ -30,7 +30,6 @@ import win.downops.wallettracker.data.SessionRepository
 import win.downops.wallettracker.data.LoginRepository
 import win.downops.wallettracker.ui.login.LoginActivity
 import win.downops.wallettracker.util.AppResultHandler
-import win.downops.wallettracker.ui.importSheet.SharedCsvViewModel
 import win.downops.wallettracker.util.Logger
 
 @AndroidEntryPoint
@@ -41,7 +40,6 @@ class MainActivity  : AppCompatActivity() {
     lateinit var sessionRepo: SessionRepository
     @Inject
     lateinit var loginRepo: LoginRepository
-    private val sharedCsvViewModel: SharedCsvViewModel by viewModels()
     private lateinit var appBarConfiguration: AppBarConfiguration
     private lateinit var binding: ActivityMainBinding
 
@@ -93,35 +91,8 @@ class MainActivity  : AppCompatActivity() {
                 lblUsername.text = session.username
             }
 
-            handleShareIntent(intent)
         }catch(e: Exception){
             Logger.log(e)
-        }
-    }
-
-    @RequiresApi(Build.VERSION_CODES.O)
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        handleShareIntent(intent)
-    }
-
-    @RequiresApi(Build.VERSION_CODES.O)
-    private fun handleShareIntent(intent: Intent) {
-        if (intent.action != Intent.ACTION_SEND) return
-        val uri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
-        } else {
-            @Suppress("DEPRECATION")
-            intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
-        } ?: return
-        sharedCsvViewModel.pendingUri = uri
-        setIntent(Intent(this, MainActivity::class.java))
-        binding.root.post {
-            val navOptions = NavOptions.Builder()
-                .setLaunchSingleTop(true)
-                .setPopUpTo(R.id.nav_categories, inclusive = false)
-                .build()
-            findNavController(R.id.nav_host_fragment_content_main).navigate(R.id.nav_importsheet, null, navOptions)
         }
     }
 

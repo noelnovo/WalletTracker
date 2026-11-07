@@ -1,0 +1,45 @@
+{
+  "verified_on": "2026-11-05",
+  "environment": "dev",
+  "production_changed": false,
+  "vault_values_or_policies_changed": false,
+  "android": {
+    "app_source_revision": "840295a5c61fd1c9d2c5b8ae0e9686a8b75efe9f",
+    "package": "win.downops.wallettracker.debug",
+    "label": "Wallet Dev",
+    "version": "3.0.0-dev",
+    "device": "Pixel 9",
+    "installation": "adb install -r; production package retained",
+    "apk_sha256": "abe27f99b28d0f261f0184099ce943371ca8ae2e71c081a3c3a1f36bb3760c47",
+    "jvm_unit_tests": "passed",
+    "device_tests_with_live_private_https": "9 passed",
+    "ui_checks": ["fingerprint icon state and accessibility", "Material date selection and localized display", "matching outlined dropdowns", "first-category to expense flow", "exact 10 EUR / 3 person bill shares", "swipe and undo", "private dialogs dismissed and wallet locked after backgrounding"],
+    "gitlab_apk_build": "manual by default until ANDROID_CI_CAPACITY_READY=true",
+    "stable_ci_signing": "owner Vault provisioning required; local dev APK uses local debug certificate"
+  },
+  "backend": {
+    "project": "downops/wallet-tracker-backend",
+    "pipeline": 820,
+    "pipeline_result": "success",
+    "source_revision": "8d5a9e1bc5780778846493cb66219771def40d10",
+    "gitops_revision": "a08987fd6374cd3bb752c2f34f3f4ff6acc1194a",
+    "application_tests": "63 passed",
+    "delivery_tests": "13 passed",
+    "real_mariadb_migrations_and_concurrency": "passed",
+    "image_smoke": "passed",
+    "sonarqube_quality_gate": "passed without bypass",
+    "dependency_track": "analyzed; gate passed",
+    "live_https_ready_status": 200,
+    "live_unauthenticated_sync_status": 401,
+    "live_acceptance": ["dev registration and login", "categories, expenses and exact bill shares", "bounded pagination", "two-session optimistic conflict and explicit resolution", "refresh rotation and replay revocation", "logout revocation"],
+    "synthetic_acceptance_user_id": "3",
+    "synthetic_active_finance_records_remaining": 0,
+    "synthetic_acceptance_sessions": "revoked"
+  },
+  "boundaries": [
+    "No external off-LAN port/NAT probe was performed; exposure audit and dev allowlist are documented separately.",
+    "Owner-driven successful fingerprint interaction still needs acceptance; tests prove hardware crypto refuses unauthenticated decryption.",
+    "Locked/restarted apps resume synchronization after unlock, not by bypassing biometric protection in background.",
+    "Legacy device-only finance migration and backend runtime/provisioner privilege separation plus credential-at-rest migration remain production-release work."
+  ]
+}

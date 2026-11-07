@@ -10,7 +10,6 @@ import win.downops.wallettracker.data.SessionRepository
 import win.downops.wallettracker.data.api.ApiClient
 import win.downops.wallettracker.data.api.BaseHttpService
 import win.downops.wallettracker.data.api.communication.requests.CreateImporteRequest
-import win.downops.wallettracker.data.api.communication.requests.CreateImportesBulkRequest
 import win.downops.wallettracker.data.api.communication.requests.ImporteBySeasonIdRequest
 import win.downops.wallettracker.data.api.communication.requests.ImporteIdRequest
 import win.downops.wallettracker.data.api.communication.responses.BaseResponse
@@ -57,22 +56,6 @@ class ImporteHttpService @Inject constructor(
                 else AppResult.Error(parsed.message)
             }
         )
-    }
-
-    override suspend fun createAll(importes: List<Importe>): AppResult<Unit> {
-        val requests = importes.map { 
-            CreateImporteRequest(it.getConcept(), it.getDateString(), it.getAmount(), it.getBalanceAfter(), it.getSeasonId())
-        }
-        val bulkRequest = CreateImportesBulkRequest(importes = requests)
-        
-        return safeApiCall { token ->
-            ApiClient.importe.createAll("Bearer $token", getCipheredText(), encryptData(bulkRequest) ?: throw Exception(authenticationErrorMessage))
-        }.let { result ->
-            when (result) {
-                is AppResult.Success -> AppResult.Success(result.message, Unit)
-                is AppResult.Error -> result
-            }
-        }
     }
 
     override suspend fun deleteById(importeId: Long): AppResult<Unit> {

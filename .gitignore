@@ -43,3 +43,10 @@ google-services.json
 # Jetpack Compose tooling
 *.db
 *.db-journal
+.dev-signing-*/
+.android-sdk/
+.gradle-ci/
+__pycache__/
+.prod-signing-*/
+delivery/artifacts/
+delivery/check-artifacts/

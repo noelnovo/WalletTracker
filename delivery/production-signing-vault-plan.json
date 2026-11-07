@@ -1,0 +1,45 @@
+{
+  "status": "production release requested; preflight and existing-key verification required before activation",
+  "kv_mount": "downops",
+  "kv_v2_path": "apps/wallettracker/prod/mobile",
+  "required_keys": ["KEYSTORE_BASE64", "KEYSTORE_PASSWORD", "KEY_ALIAS"],
+  "optional_keys": ["KEY_PASSWORD"],
+  "preserve_previous_production_signing_certificate": true,
+  "expected_public_certificate_sha256": "60b988457cca109d8f3a1f3ad288f95648f9938990aeedff0dfc5ed479952b61",
+  "source_production_record": "downops/apps/wallettracker/mobile",
+  "policy": "path \"downops/data/apps/wallettracker/prod/mobile\" { capabilities = [\"read\"] }",
+  "auth_mount": "gitlab-ci",
+  "role": "wallettracker-android-ci-prod",
+  "role_settings": {
+    "role_type": "jwt",
+    "user_claim": "user_id",
+    "bound_audiences": ["https://vault.int.downops.win"],
+    "bound_claims_type": "glob",
+    "bound_claims": {"project_id": "31", "namespace_path": "downops", "ref_type": "tag", "ref": "v*", "ref_protected": "true"},
+    "token_policies": ["wallettracker-android-ci-prod"],
+    "token_no_default_policy": true,
+    "token_type": "batch",
+    "token_ttl": 900,
+    "token_max_ttl": 900
+  },
+  "activation": "Only after recovery, production API-v2 rollout, protected main/tag mirror equality, migration acceptance and signing identity verification. No signing-key generation or rotation.",
+  "publication": {
+    "kv_v2_path": "apps/wallettracker/delivery/github-release",
+    "required_keys": ["GITHUB_RELEASE_TOKEN"],
+    "credential_scope": "Fine-grained GitHub credential restricted to noelnovo/WalletTracker, Contents read/write and default Metadata read only; no administration/workflow access. Or an existing authorized equivalent operator publication mechanism; never copy an estate-admin token into CI.",
+    "role": "wallettracker-android-publish-prod",
+    "policy": "path \"downops/data/apps/wallettracker/delivery/github-release\" { capabilities = [\"read\"] }",
+    "role_settings": {
+      "role_type": "jwt",
+      "user_claim": "user_id",
+      "bound_audiences": ["https://vault.int.downops.win"],
+      "bound_claims_type": "glob",
+      "bound_claims": {"project_id": "31", "namespace_path": "downops", "ref_type": "tag", "ref": "v*", "ref_protected": "true"},
+      "token_policies": ["wallettracker-android-publish-prod"],
+      "token_no_default_policy": true,
+      "token_type": "batch",
+      "token_ttl": 900,
+      "token_max_ttl": 900
+    }
+  }
+}
