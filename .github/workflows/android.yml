@@ -76,19 +76,21 @@ jobs:
         with:
           packages: platform-tools
       - run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
-      - uses: hashicorp/vault-action@v3
+      - id: vault
+        uses: hashicorp/vault-action@v3
         with:
           url: https://vault.downops.win
           method: jwt
           path: github-actions
           role: wallettracker-mobile-ci-dev
           jwtGithubAudience: https://vault.downops.win
-          exportToken: true
+          exportToken: false
           exportEnv: false
           secrets: downops/data/apps/wallettracker/dev/mobile * | DEV_
       - run: python3 delivery/build_dev.py
         env:
           DEV_SIGNING_READY: 'true'
+          SIGNING_INPUT_JSON: ${{ toJSON(steps.vault.outputs) }}
       - uses: actions/upload-artifact@v4
         with:
           name: wallettracker-dev-${{ github.sha }}
@@ -119,17 +121,20 @@ jobs:
         with:
           packages: platform-tools
       - run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
-      - uses: hashicorp/vault-action@v3
+      - id: vault
+        uses: hashicorp/vault-action@v3
         with:
           url: https://vault.downops.win
           method: jwt
           path: github-actions
           role: wallettracker-mobile-ci-prod
           jwtGithubAudience: https://vault.downops.win
-          exportToken: true
+          exportToken: false
           exportEnv: false
           secrets: downops/data/apps/wallettracker/prod/mobile * | PROD_
       - run: python3 delivery/check_prod.py
+        env:
+          SIGNING_INPUT_JSON: ${{ toJSON(steps.vault.outputs) }}
       - uses: actions/upload-artifact@v4
         with:
           name: production-signing-check-${{ github.sha }}
@@ -183,17 +188,20 @@ jobs:
         with:
           packages: platform-tools
       - run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
-      - uses: hashicorp/vault-action@v3
+      - id: vault
+        uses: hashicorp/vault-action@v3
         with:
           url: https://vault.downops.win
           method: jwt
           path: github-actions
           role: wallettracker-mobile-ci-prod
           jwtGithubAudience: https://vault.downops.win
-          exportToken: true
+          exportToken: false
           exportEnv: false
           secrets: downops/data/apps/wallettracker/prod/mobile * | PROD_
       - run: python3 delivery/build_prod.py
+        env:
+          SIGNING_INPUT_JSON: ${{ toJSON(steps.vault.outputs) }}
       - uses: actions/upload-artifact@v4
         with:
           name: wallettracker-production-${{ github.sha }}
