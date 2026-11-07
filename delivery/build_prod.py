@@ -11,7 +11,7 @@ import tempfile
 import urllib.request
 import urllib.error
 from build_dev import request as vault_request, report_failure
-from github_identity import require_production, build_environment, PRODUCTION_SIGNER
+from github_identity import require_production, build_environment, PRODUCTION_SIGNER, signing_values
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 PROD_RECORD = 'downops/data/apps/wallettracker/prod/mobile'
@@ -106,10 +106,7 @@ def main(*, validation=False):
     tag = validate_check_identity(env) if validation else validate_identity(env)
     # Build/sign before the write-freeze to minimize downtime; publication gates API-v2.
     verify_backend(require_v2=False)
-    token = env.get('VAULT_TOKEN')
-    if not token:
-        raise RuntimeError('The scoped GitHub OIDC Vault login must succeed before production signing')
-    values = vault_request(PROD_RECORD, token=token)['data']['data']
+    values = signing_values(env, 'PROD')
     if not all(values.get(key) for key in ('KEYSTORE_BASE64', 'KEYSTORE_PASSWORD', 'KEY_ALIAS')):
         raise RuntimeError('Canonical production keystore record is incomplete')
     env.pop('VAULT_ID_TOKEN', None)

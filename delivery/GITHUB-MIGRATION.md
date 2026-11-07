@@ -28,6 +28,11 @@ The production tag/environment controls, exact version/main ancestry, unchanged
 signer, recovery checkpoint and live backend/API-v2 gates remain in force.
 No production app deployment or database migration is part of this CI cutover.
 
+Signing builders consume the Vault action's already-read, masked step outputs
+through `SIGNING_INPUT_JSON`. They do not make a duplicate public HTTP secret
+read or require an exported Vault token. The private JSON is removed before
+Gradle starts; production passwords are also removed from Gradle's environment.
+
 ## GitHub Releases
 
 Publication uses the built-in `GITHUB_TOKEN`, exposed only to a separate job with

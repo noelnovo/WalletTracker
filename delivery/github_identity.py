@@ -1,5 +1,6 @@
 """GitHub-only source guards; Vault independently validates the job's OIDC claims."""
 import re
+import json
 
 REPOSITORY = 'noelnovo/WalletTracker'
 REPOSITORY_ID = '909094292'
@@ -37,7 +38,30 @@ def require_production(env):
 
 def build_environment(env):
     """Gradle must not inherit OIDC/Vault/publication or Actions runtime tokens."""
-    forbidden = {'VAULT_TOKEN', 'VAULT_ID_TOKEN', 'GH_TOKEN', 'GITHUB_TOKEN',
+    forbidden = {'VAULT_TOKEN', 'VAULT_ID_TOKEN', 'GH_TOKEN', 'GITHUB_TOKEN', 'SIGNING_INPUT_JSON',
                  'ACTIONS_ID_TOKEN_REQUEST_TOKEN', 'ACTIONS_ID_TOKEN_REQUEST_URL',
                  'ACTIONS_RUNTIME_TOKEN', 'PROD_KEYSTORE_PASSWORD', 'PROD_KEY_PASSWORD'}
     return {key: value for key, value in env.items() if key not in forbidden}
+
+
+def signing_values(env, prefix):
+    """Consume only the masked outputs of the workflow's scoped Vault action."""
+    if prefix not in ('DEV', 'PROD'):
+        raise RuntimeError('Unknown signing input namespace')
+    raw = env.get('SIGNING_INPUT_JSON')
+    if not raw:
+        raise RuntimeError('The verified Vault action signing outputs are required')
+    try:
+        outputs = json.loads(raw)
+    except (TypeError, ValueError):
+        raise RuntimeError('The verified signing outputs must be valid JSON') from None
+    if not isinstance(outputs, dict):
+        raise RuntimeError('The verified signing outputs must be an object')
+    values = {key: outputs.get(prefix + '_' + key) for key in
+              ('KEYSTORE_BASE64', 'KEYSTORE_PASSWORD', 'KEY_ALIAS', 'KEY_PASSWORD')}
+    if not all(isinstance(values[key], str) and values[key] for key in
+               ('KEYSTORE_BASE64', 'KEYSTORE_PASSWORD', 'KEY_ALIAS')):
+        raise RuntimeError('The verified signing outputs are incomplete')
+    if values['KEY_PASSWORD'] is not None and not isinstance(values['KEY_PASSWORD'], str):
+        raise RuntimeError('The optional private-key password must be a string')
+    return values

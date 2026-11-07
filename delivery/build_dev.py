@@ -10,7 +10,7 @@ import subprocess
 import tempfile
 import urllib.request
 import urllib.error
-from github_identity import require_dev, build_environment, PRODUCTION_SIGNER
+from github_identity import require_dev, build_environment, PRODUCTION_SIGNER, signing_values
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 VAULT = 'https://vault.downops.win'
@@ -100,10 +100,7 @@ def main():
     try:
         if env.get('DEV_SIGNING_READY', 'false').lower() == 'true':
             require_dev(env)
-            token = env.get('VAULT_TOKEN')
-            if not token:
-                raise RuntimeError('The scoped GitHub OIDC Vault login must succeed before signing')
-            values = request(DEV_SIGNING_PATH, token=token)['data']['data']
+            values = signing_values(env, 'DEV')
             required = ('KEYSTORE_BASE64', 'KEYSTORE_PASSWORD', 'KEY_ALIAS')
             if not all(values.get(key) for key in required):
                 raise RuntimeError('The development signing record is incomplete')

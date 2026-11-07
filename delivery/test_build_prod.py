@@ -92,11 +92,11 @@ class ProductionSigningTests(unittest.TestCase):
                     pathlib.Path(args[args.index('--out') + 1]).write_bytes(b'synthetic-signed-apk')
                 return ''
             with patch.object(build_prod, 'ROOT', root), \
-                 patch.dict(os.environ, {'VAULT_TOKEN': 'synthetic-vault-token', 'GH_TOKEN': 'synthetic-publish-token', 'ANDROID_HOME': str(root / 'sdk'), 'GITHUB_SHA': 'a' * 40}, clear=True), \
+                 patch.dict(os.environ, {'SIGNING_INPUT_JSON': json.dumps({'PROD_' + key: value for key, value in values.items()}), 'GH_TOKEN': 'synthetic-publish-token', 'ANDROID_HOME': str(root / 'sdk'), 'GITHUB_SHA': 'a' * 40}, clear=True), \
                  patch.object(build_prod, 'validate_check_identity', return_value='v3.0.0-ci-check'), \
                  patch.object(build_prod, 'validate_identity') as release_identity, \
                  patch.object(build_prod, 'verify_backend'), \
-                 patch.object(build_prod, 'vault_request', return_value={'data': {'data': values}}), \
+                 patch.object(build_prod, 'vault_request') as request, \
                  patch.object(build_prod.urllib.request, 'urlopen', return_value=io.BytesIO(previous)), \
                  patch.object(build_prod, 'PREVIOUS_APK_SHA256', hashlib.sha256(previous).hexdigest()), \
                  patch.object(build_prod.subprocess, 'run') as gradle, \
@@ -105,9 +105,11 @@ class ProductionSigningTests(unittest.TestCase):
                  patch.object(build_prod, 'validate_built_configuration'):
                 build_prod.main(validation=True)
             release_identity.assert_not_called()
+            request.assert_not_called()
             self.assertNotIn('VAULT_ID_TOKEN', gradle.call_args.kwargs['env'])
             self.assertNotIn('VAULT_TOKEN', gradle.call_args.kwargs['env'])
             self.assertNotIn('GH_TOKEN', gradle.call_args.kwargs['env'])
+            self.assertNotIn('SIGNING_INPUT_JSON', gradle.call_args.kwargs['env'])
             self.assertNotIn('PROD_KEYSTORE_PASSWORD', gradle.call_args.kwargs['env'])
             self.assertEqual(list(root.glob('.prod-signing-*')), [])
             self.assertEqual(list(root.rglob('*.apk')), [])

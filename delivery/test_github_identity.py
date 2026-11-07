@@ -2,7 +2,7 @@ import json
 import pathlib
 import unittest
 from ci_test_support import github_environment
-from github_identity import require_repository, require_dev, require_production, build_environment
+from github_identity import require_repository, require_dev, require_production, build_environment, signing_values
 
 
 class GitHubIdentityTests(unittest.TestCase):
@@ -26,7 +26,7 @@ class GitHubIdentityTests(unittest.TestCase):
             require_production(github_environment(GITHUB_REF_PROTECTED='false'))
 
     def test_gradle_receives_no_job_identity_or_production_signing_secrets(self):
-        secrets = ('VAULT_TOKEN', 'VAULT_ID_TOKEN', 'GH_TOKEN', 'GITHUB_TOKEN',
+        secrets = ('VAULT_TOKEN', 'VAULT_ID_TOKEN', 'GH_TOKEN', 'GITHUB_TOKEN', 'SIGNING_INPUT_JSON',
                    'ACTIONS_ID_TOKEN_REQUEST_TOKEN', 'ACTIONS_ID_TOKEN_REQUEST_URL',
                    'ACTIONS_RUNTIME_TOKEN', 'PROD_KEYSTORE_PASSWORD', 'PROD_KEY_PASSWORD')
         env = dict.fromkeys(secrets, 'synthetic-secret')
@@ -64,6 +64,16 @@ class GitHubIdentityTests(unittest.TestCase):
         for suffix in ('dev', 'prod'):
             body = json.loads((root / ('github-actions/role-' + suffix + '.json')).read_text())
             self.assertEqual(body, plan['roles']['wallettracker-mobile-ci-' + suffix])
+
+    def test_signing_input_prefix_and_required_fields_are_fail_closed(self):
+        values = {'KEYSTORE_BASE64': 'synthetic-key', 'KEYSTORE_PASSWORD': 'synthetic-password', 'KEY_ALIAS': 'dev'}
+        env = {'SIGNING_INPUT_JSON': json.dumps({'DEV_' + key: value for key, value in values.items()})}
+        self.assertEqual(signing_values(env, 'DEV')['KEY_ALIAS'], 'dev')
+        with self.assertRaises(RuntimeError):
+            signing_values(env, 'PROD')
+        for raw in ('not-json', '[]', '{}'):
+            with self.subTest(raw=raw), self.assertRaises(RuntimeError):
+                signing_values({'SIGNING_INPUT_JSON': raw}, 'DEV')
 
 
 if __name__ == '__main__':

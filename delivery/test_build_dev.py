@@ -29,21 +29,21 @@ class DevSigningTests(unittest.TestCase):
                           'KEYSTORE_PASSWORD': 'synthetic-store-password', 'KEY_ALIAS': 'dev'}
                 if key_password:
                     values['KEY_PASSWORD'] = key_password
-                responses = [{'data': {'data': values}}]
+                payload = json.dumps({'DEV_' + key: value for key, value in values.items()})
                 with tempfile.TemporaryDirectory(dir='/tmp/opencode') as directory:
-                    with patch.dict(os.environ, self.environment(), clear=True), \
+                    with patch.dict(os.environ, self.environment(SIGNING_INPUT_JSON=payload), clear=True), \
                           patch.object(build_dev, 'ROOT', pathlib.Path(directory)), \
-                          patch.object(build_dev, 'request', side_effect=responses) as request, \
+                          patch.object(build_dev, 'request') as request, \
                           patch.object(build_dev.subprocess, 'run') as run, \
                           patch.object(build_dev, 'verify_artifact') as verify:
                         build_dev.main()
-                        request.assert_any_call('downops/data/apps/wallettracker/dev/mobile', token='synthetic-vault-token')
-                        self.assertEqual(len(request.call_args_list), 1)
+                        request.assert_not_called()
                         env = run.call_args.kwargs['env']
                         self.assertEqual(env['DEV_KEY_PASSWORD'], key_password or values['KEYSTORE_PASSWORD'])
                         self.assertNotIn('VAULT_ID_TOKEN', env)
                         self.assertNotIn('VAULT_TOKEN', env)
                         self.assertNotIn('ACTIONS_ID_TOKEN_REQUEST_TOKEN', env)
+                        self.assertNotIn('SIGNING_INPUT_JSON', env)
                         self.assertEqual(list(pathlib.Path(directory).iterdir()), [])
                         verify.assert_called_once()
 
