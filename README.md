@@ -1,9 +1,12 @@
 # Wallet Tracker
 
-> **Dev is now the WalletTracker3/API-v2 refactor.** See
-> [the dev architecture, security boundaries, sync behavior and Vault signing plan](delivery/DEV-REFACTOR.md).
+> **WalletTracker 3 uses API v2.** See the
+> [developer release guide](delivery/PRODUCTION-RELEASE.md) and
+> [architecture, security boundaries, sync behavior and Vault signing plan](delivery/DEV-REFACTOR.md).
 > The historical v1 overview below is retained for migration context; the new
-> launcher has no file import or hybrid-encrypted API protocol. GitLab CI owns dev APKs.
+> launcher has no file import or hybrid-encrypted API protocol. GitHub Actions
+> validates DEV and publishes approved MAIN releases; GitLab is a passive backup
+> with CI disabled. The feature/protocol descriptions and screenshots below are historical.
 
 An Android expense tracking app built in Kotlin with end-to-end encryption, biometric authentication, and a fully automated CI/CD pipeline.
 
@@ -45,16 +48,27 @@ Keys are stored in the local SQLite session table and never leave the device une
 
 ## CI/CD Pipeline
 
-The GitHub Actions CD workflow triggers on every push to `main`:
+The workflow is [`.github/workflows/android.yml`](.github/workflows/android.yml).
+Pushing DEV or MAIN runs checks and unsigned compilation; it does **not** publish
+a release. A real release requires an exact protected `vX.Y.Z` tag on MAIN:
 
-1. **Version extraction** — reads `majorVersion`, `minorVersion`, `patchVersion` from `app/build.gradle.kts` to derive the release tag (e.g. `v1.2.3`)
-2. **Duplicate check** — skips all subsequent steps if a GitHub release for that tag already exists
-3. **Vault secrets** — fetches signing credentials and build config from a self-hosted HashiCorp Vault instance (`vault.downops.win`) using a scoped token; secrets include the keystore, passwords, key alias, API base URL, and the signing secret word
-4. **Build** — compiles a release APK with Gradle on JDK 17
-5. **Sign** — zipaligns and signs the APK with `apksigner` using the keystore retrieved from Vault
-6. **GitHub Release** — publishes a new release with the signed APK attached and auto-generated release notes, marked as latest
+1. Update the version in `app/build.gradle.kts` and add matching release notes.
+2. Pass DEV CI and merge the reviewed release PR into MAIN.
+3. An authorized release maintainer creates the protected version tag on MAIN.
+4. Checks, unsigned compilation and release-context validation run automatically.
+5. The production reviewer approves **once**, before Vault-backed signing.
+6. CI signs with the existing production identity, verifies the APK and publishes
+   it automatically with its job-scoped `GITHUB_TOKEN`.
 
-Signing keys and secrets are never stored in the repository; they exist exclusively in Vault and are injected at build time.
+Developers do not need SSH, Kubernetes or Vault credentials. Ordinary source-code
+write access does not grant protected-tag creation or production-review rights.
+Signing keys never belong in Git; the signing job authenticates to Vault using
+restricted GitHub OIDC. The publication job has separate permissions and no
+second production review. Registration is controlled by the server, not hidden
+or hard-disabled in the APK. An Android release does not deploy the backend or
+run database migrations/backups.
+
+See [the complete release procedure and troubleshooting guide](delivery/PRODUCTION-RELEASE.md).
 
 ## Tech Stack
 
@@ -75,4 +89,4 @@ Signing keys and secrets are never stored in the repository; they exist exclusiv
 
 ![Expenses](images/expenses.jpg)
 
-![Create expense](images/create_expense.jpg)
+![Create expense](images/create%20expense.jpg)
