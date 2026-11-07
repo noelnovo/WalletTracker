@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import tempfile
 import urllib.request
+import urllib.error
 from github_identity import require_dev, build_environment, PRODUCTION_SIGNER
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -62,6 +63,37 @@ def verify_artifact(keyfile, values, env):
     print('Development APK signature and stable signer verified; receipt produced', flush=True)
 
 
+def report_failure(error):
+    """A bounded public CI annotation; never expose exception bodies or credentials."""
+    if isinstance(error, urllib.error.HTTPError):
+        headers = error.headers or {}
+        content = headers.get('Content-Type', '').lower()
+        kind = 'html' if 'text/html' in content else 'json' if 'json' in content else 'other'
+        challenge = headers.get('cf-mitigated', '').lower() == 'challenge'
+        category = 'vault-read-http-' + str(error.code) + '; format=' + kind + '; edge-challenge=' + str(challenge).lower()
+        error.close()
+    elif isinstance(error, FileNotFoundError):
+        tool = pathlib.Path(error.filename or '').name
+        category = 'missing-tool-' + (tool if tool in ('keytool', 'apksigner', 'gradlew') else 'unclassified')
+    elif isinstance(error, subprocess.CalledProcessError):
+        category = 'gradle-build-failed'
+    elif isinstance(error, KeyError):
+        key = error.args[0] if error.args else ''
+        category = 'missing-input-' + (key if key in ('ANDROID_HOME', 'GITHUB_SHA', 'KEY_ALIAS', 'KEYSTORE_PASSWORD') else 'unclassified')
+    elif isinstance(error, RuntimeError):
+        fixed = str(error)
+        category = ('vault-token-not-exported' if fixed in (
+                        'The scoped GitHub OIDC Vault login must succeed before signing',
+                        'The scoped GitHub OIDC Vault login must succeed before production signing') else
+                    'keystore-record-incomplete' if fixed == 'The development signing record is incomplete' else
+                    'github-job-identity' if 'GitHub' in fixed or 'workflow identity' in fixed else
+                    'dev-signer-verification' if 'certificate' in fixed or 'signing identity' in fixed else
+                    'runtime-validation-failed')
+    else:
+        category = 'unexpected-build-error'
+    print('::error title=WalletTracker signing diagnostic::' + category, flush=True)
+
+
 def main():
     env = os.environ.copy()
     directory = None
@@ -98,4 +130,8 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except Exception as error:
+        report_failure(error)
+        raise

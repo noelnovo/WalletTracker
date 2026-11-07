@@ -10,7 +10,7 @@ import subprocess
 import tempfile
 import urllib.request
 import urllib.error
-from build_dev import request as vault_request
+from build_dev import request as vault_request, report_failure
 from github_identity import require_production, build_environment, PRODUCTION_SIGNER
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -161,4 +161,8 @@ def main(*, validation=False):
 
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except Exception as error:
+        report_failure(error)
+        raise

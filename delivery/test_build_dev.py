@@ -113,6 +113,22 @@ class DevSigningTests(unittest.TestCase):
                     self.assertNotIn('VAULT_TOKEN', call.kwargs['env'])
                     self.assertNotIn('ACTIONS_ID_TOKEN_REQUEST_TOKEN', call.kwargs['env'])
 
+    def test_failure_annotation_contains_categories_not_credentials(self):
+        cases = [
+            (RuntimeError('The scoped GitHub OIDC Vault login must succeed before signing'), 'vault-token-not-exported'),
+            (RuntimeError('synthetic-secret-value'), 'runtime-validation-failed'),
+            (KeyError('ANDROID_HOME'), 'missing-input-ANDROID_HOME'),
+            (build_dev.urllib.error.HTTPError('https://vault.downops.win/hidden', 403, 'synthetic-secret-value',
+                {'Content-Type': 'text/html', 'cf-mitigated': 'challenge'}, None),
+             'vault-read-http-403; format=html; edge-challenge=true'),
+        ]
+        for error, category in cases:
+            with self.subTest(category=category), patch('builtins.print') as output:
+                build_dev.report_failure(error)
+                self.assertIn(category, output.call_args.args[0])
+                self.assertNotIn('synthetic-secret-value', output.call_args.args[0])
+                self.assertNotIn('/hidden', output.call_args.args[0])
+
 
 if __name__ == '__main__':
     unittest.main()
