@@ -1,4 +1,4 @@
 {
-  "vault_signing_ready": false,
-  "reason": "Actual GitHub login rejected the old name-only subject. GitHub API confirms immutable subject prefix with owner/repository IDs. Keep signing closed until the corrected complete role bodies are applied and verified; do not broaden policies or rotate keys."
+  "vault_signing_ready": true,
+  "reason": "Owner confirmed applying the corrected complete role bodies with GitHub's API-verified immutable subject prefix. Run new real signing tests; any auth/signature failure stops the workflow. Existing policies and signing keys are unchanged. No production deployment or public release is implied by this test gate."
 }
