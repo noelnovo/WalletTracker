@@ -113,7 +113,8 @@ jobs:
   publish-prod:
     needs: prod-apk
     runs-on: ubuntu-latest
-    environment: production
+    # Production is approved once before signing. This job only publishes the
+    # verified, immutable artifact from that successful same-run signing job.
     permissions:
       contents: write
     steps:
