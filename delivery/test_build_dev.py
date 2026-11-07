@@ -22,7 +22,7 @@ class DevSigningTests(unittest.TestCase):
                                   VAULT_TOKEN='synthetic-vault-token',
                                   ACTIONS_ID_TOKEN_REQUEST_TOKEN='synthetic-oidc-request', **changes)
 
-    def test_only_canonical_dev_record_is_read(self):
+    def test_scoped_outputs_are_used_without_a_duplicate_vault_http_read(self):
         for key_password in (None, 'synthetic-distinct-key-password'):
             with self.subTest(distinct_key_password=key_password is not None):
                 values = {'KEYSTORE_BASE64': base64.b64encode(b'synthetic-keystore').decode(),
@@ -33,7 +33,7 @@ class DevSigningTests(unittest.TestCase):
                 with tempfile.TemporaryDirectory(dir='/tmp/opencode') as directory:
                     with patch.dict(os.environ, self.environment(SIGNING_INPUT_JSON=payload), clear=True), \
                           patch.object(build_dev, 'ROOT', pathlib.Path(directory)), \
-                          patch.object(build_dev, 'request') as request, \
+                          patch.object(build_dev.urllib.request, 'urlopen') as request, \
                           patch.object(build_dev.subprocess, 'run') as run, \
                           patch.object(build_dev, 'verify_artifact') as verify:
                         build_dev.main()
@@ -52,7 +52,7 @@ class DevSigningTests(unittest.TestCase):
                         {'GITHUB_EVENT_NAME': 'pull_request'}, {'GITHUB_ACTIONS': 'false'}):
             with self.subTest(changes=changes), \
                  patch.dict(os.environ, self.environment(**changes), clear=True), \
-                 patch.object(build_dev, 'request') as request, \
+                  patch.object(build_dev.urllib.request, 'urlopen') as request, \
                  patch.object(build_dev.subprocess, 'run') as run:
                 with self.assertRaises(RuntimeError):
                     build_dev.main()
@@ -61,7 +61,7 @@ class DevSigningTests(unittest.TestCase):
 
     def test_disposable_build_does_not_read_vault_or_forward_identity(self):
         with patch.dict(os.environ, dict(self.environment(), DEV_SIGNING_READY='false'), clear=True), \
-             patch.object(build_dev, 'request') as request, \
+             patch.object(build_dev.urllib.request, 'urlopen') as request, \
              patch.object(build_dev.subprocess, 'run') as run:
             build_dev.main()
             request.assert_not_called()
@@ -115,12 +115,12 @@ class DevSigningTests(unittest.TestCase):
 
     def test_failure_annotation_contains_categories_not_credentials(self):
         cases = [
-            (RuntimeError('The scoped GitHub OIDC Vault login must succeed before signing'), 'vault-token-not-exported'),
+            (RuntimeError('The verified Vault action signing outputs are required'), 'vault-action-output-input'),
             (RuntimeError('synthetic-secret-value'), 'runtime-validation-failed'),
             (KeyError('ANDROID_HOME'), 'missing-input-ANDROID_HOME'),
             (build_dev.urllib.error.HTTPError('https://vault.downops.win/hidden', 403, 'synthetic-secret-value',
                 {'Content-Type': 'text/html', 'cf-mitigated': 'challenge'}, None),
-             'vault-read-http-403; format=html; edge-challenge=true'),
+             'public-dependency-http-403; format=html; edge-challenge=true'),
         ]
         for error, category in cases:
             with self.subTest(category=category), patch('builtins.print') as output:

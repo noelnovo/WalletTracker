@@ -13,24 +13,12 @@ import urllib.error
 from github_identity import require_dev, build_environment, PRODUCTION_SIGNER, signing_values
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-VAULT = 'https://vault.downops.win'
 DEV_SIGNING_PATH = 'downops/data/apps/wallettracker/dev/mobile'
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
-
-
-def request(path, data=None, token=None):
-    headers = {'Content-Type': 'application/json'}
-    if token:
-        headers['X-Vault-Token'] = token
-    req = urllib.request.Request(VAULT + '/v1/' + path,
-                                 data=json.dumps(data).encode() if data is not None else None,
-                                 headers=headers)
-    with urllib.request.build_opener(NoRedirect()).open(req, timeout=30) as response:
-        return json.load(response)
 
 
 def verify_artifact(keyfile, values, env):
@@ -53,6 +41,7 @@ def verify_artifact(keyfile, values, env):
     if verification.returncode or len(digests) != 1 or digests[0].lower() != expected:
         raise RuntimeError('Built development APK does not match the stable DEV signing certificate')
     receipt = {'source_revision': env['GITHUB_SHA'], 'package': 'win.downops.wallettracker.debug',
+               'signing_record_path': DEV_SIGNING_PATH,
                'purpose': 'development', 'publishable': False,
                'apk_sha256': hashlib.sha256(apk.read_bytes()).hexdigest(),
                'certificate_public_sha256': expected,
@@ -70,7 +59,7 @@ def report_failure(error):
         content = headers.get('Content-Type', '').lower()
         kind = 'html' if 'text/html' in content else 'json' if 'json' in content else 'other'
         challenge = headers.get('cf-mitigated', '').lower() == 'challenge'
-        category = 'vault-read-http-' + str(error.code) + '; format=' + kind + '; edge-challenge=' + str(challenge).lower()
+        category = 'public-dependency-http-' + str(error.code) + '; format=' + kind + '; edge-challenge=' + str(challenge).lower()
         error.close()
     elif isinstance(error, FileNotFoundError):
         tool = pathlib.Path(error.filename or '').name
@@ -82,9 +71,7 @@ def report_failure(error):
         category = 'missing-input-' + (key if key in ('ANDROID_HOME', 'GITHUB_SHA', 'KEY_ALIAS', 'KEYSTORE_PASSWORD') else 'unclassified')
     elif isinstance(error, RuntimeError):
         fixed = str(error)
-        category = ('vault-token-not-exported' if fixed in (
-                        'The scoped GitHub OIDC Vault login must succeed before signing',
-                        'The scoped GitHub OIDC Vault login must succeed before production signing') else
+        category = ('vault-action-output-input' if fixed.startswith('The verified signing outputs') or fixed == 'The verified Vault action signing outputs are required' else
                     'keystore-record-incomplete' if fixed == 'The development signing record is incomplete' else
                     'github-job-identity' if 'GitHub' in fixed or 'workflow identity' in fixed else
                     'dev-signer-verification' if 'certificate' in fixed or 'signing identity' in fixed else

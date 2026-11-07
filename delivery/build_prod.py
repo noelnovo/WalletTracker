@@ -10,7 +10,7 @@ import subprocess
 import tempfile
 import urllib.request
 import urllib.error
-from build_dev import request as vault_request, report_failure
+from build_dev import report_failure
 from github_identity import require_production, build_environment, PRODUCTION_SIGNER, signing_values
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -147,6 +147,7 @@ def main(*, validation=False):
             (output / (target.name + '.sha256')).write_text(checksum + '  ' + target.name + '\n')
         receipt_name = 'production-check-receipt.json' if validation else 'release-receipt.json'
         (output / receipt_name).write_text(json.dumps({'tag': tag, 'source_revision': env['GITHUB_SHA'],
+            'signing_record_path': PROD_RECORD,
             'package': 'win.downops.wallettracker', 'signer_matches_previous_release': True,
             'api_version': 2, 'registration_enabled': False, 'apk_sha256': checksum,
             'purpose': 'signing-validation' if validation else 'release',

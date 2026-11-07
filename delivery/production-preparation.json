@@ -1,5 +1,5 @@
 {
-  "status": "PREPARED_NOT_MERGED_OR_PUBLISHED",
+  "status": "GITHUB_CI_AND_SIGNING_VERIFIED_PRODUCTION_APPLICATION_NOT_PROMOTED",
   "android_version": "3.0.0",
   "backend_version": "2.0.0",
   "owner_authorization": {
@@ -26,7 +26,11 @@
     "prod_dev_api_and_ssh_healthy": true,
     "production_operator_wrapper_authority": "separate run-prod available; default run remains DEV-only",
     "production_vault_values_and_signing_identity": "complete staged equality and existing PKCS12 signer verified; unchanged",
-    "android_production_roles": "GitLab roles/tests are historical; exact GitHub OIDC role plan awaits administrator configuration",
+    "android_production_roles": "Owner applied corrected immutable-subject roles; real GitHub DEV and PROD signing checks passed",
+    "github_signing_verified_source": "b242d77a983908b8848bfcb2fbd66bb82596c164",
+    "github_dev_verified_run": 42318807930,
+    "github_prod_nonpublishing_verified_run": 42318978395,
+    "github_dev_public_apk_sha256": "f7abad27690b7a4fe64552e47ce7ce151025577974952f00a962c7484913ac7b",
     "sandbox_encryption_readiness_receipt": "/var/lib/wallettracker-production-operations/readiness-20261106T092637Z/readiness-receipt.json",
     "synthetic_controller_receipts": "/var/lib/wallettracker-production-operations/controller-review-20261106/unit-{a,b,c}-receipt.json",
     "synthetic_controller_tests": "success, comparison/cleanup, contention, dump/receiver failure, lease expiry, tamper and real 115-second watchdog passed",
@@ -36,7 +40,7 @@
     "production_writer": "legacy v1 active",
     "production_main_alembic_head": "f19f76872f76",
     "production_tenant_alembic_head": "c34bd55b3ea7",
-    "publication_write_identity": "built-in job-scoped GitHub Actions GITHUB_TOKEN; no external upload PAT required",
+    "publication_write_identity": "built-in GITHUB_TOKEN draft upload/digest/cleanup verified; no external upload PAT required",
     "automated_ci_publication": "GitHub-owned; release requires protected MAIN tag, signing gate, receipt and live API-v2",
     "github_actions": "new workflow restored; legacy default-branch workflows retired by CI-only commits",
     "production_signing_validation": "protected ci-check job is nonpublishable, retains receipt only, and does not replace release gates"

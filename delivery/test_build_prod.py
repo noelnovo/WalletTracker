@@ -96,8 +96,7 @@ class ProductionSigningTests(unittest.TestCase):
                  patch.object(build_prod, 'validate_check_identity', return_value='v3.0.0-ci-check'), \
                  patch.object(build_prod, 'validate_identity') as release_identity, \
                  patch.object(build_prod, 'verify_backend'), \
-                 patch.object(build_prod, 'vault_request') as request, \
-                 patch.object(build_prod.urllib.request, 'urlopen', return_value=io.BytesIO(previous)), \
+                 patch.object(build_prod.urllib.request, 'urlopen', return_value=io.BytesIO(previous)) as download, \
                  patch.object(build_prod, 'PREVIOUS_APK_SHA256', hashlib.sha256(previous).hexdigest()), \
                  patch.object(build_prod.subprocess, 'run') as gradle, \
                  patch.object(build_prod, 'command', side_effect=fake_command), \
@@ -105,7 +104,7 @@ class ProductionSigningTests(unittest.TestCase):
                  patch.object(build_prod, 'validate_built_configuration'):
                 build_prod.main(validation=True)
             release_identity.assert_not_called()
-            request.assert_not_called()
+            download.assert_called_once_with(build_prod.PREVIOUS_APK, timeout=60)
             self.assertNotIn('VAULT_ID_TOKEN', gradle.call_args.kwargs['env'])
             self.assertNotIn('VAULT_TOKEN', gradle.call_args.kwargs['env'])
             self.assertNotIn('GH_TOKEN', gradle.call_args.kwargs['env'])
