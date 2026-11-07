@@ -73,10 +73,13 @@ class DevSigningTests(unittest.TestCase):
         self.assertEqual(plan['policy'], 'path "downops/data/apps/wallettracker/dev/mobile" { capabilities = ["read"] }')
         self.assertNotIn('KEY_PASSWORD', plan['required_keys'])
 
-    def test_ci_dev_job_explicitly_uses_the_verified_stable_signer(self):
+    def test_dev_is_validation_only_and_does_not_release_signed_apks(self):
         workflow = (build_dev.ROOT / '.github/workflows/android.yml').read_text()
-        self.assertIn("DEV_SIGNING_READY: 'true'", workflow)
-        self.assertIn('role: wallettracker-mobile-ci-dev', workflow)
+        self.assertNotIn('  dev-apk:', workflow)
+        self.assertNotIn('role: wallettracker-mobile-ci-dev', workflow)
+        self.assertNotIn('  publication-check:', workflow)
+        self.assertNotIn('  prod-signing-check:', workflow)
+        self.assertIn('name: unsigned-build-test-reports', workflow)
 
     def test_actual_apk_must_match_dev_certificate_and_not_production(self):
         certificate = b'synthetic-public-certificate'

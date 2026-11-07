@@ -34,7 +34,6 @@ jobs:
 
   unsigned-build:
     needs: checks
-    if: github.event_name == 'pull_request' || needs.checks.outputs.signing_ready != 'true' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -55,100 +54,10 @@ jobs:
           path: app/build/reports/tests/
           retention-days: 7
 
-  dev-apk:
-    needs: checks
-    if: github.ref == 'refs/heads/dev' && github.event_name != 'pull_request' && needs.checks.outputs.signing_ready == 'true'
+  release-context:
+    needs: [checks, unsigned-build]
+    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-') && github.ref_protected && needs.checks.outputs.signing_ready == 'true'
     runs-on: ubuntu-latest
-    environment: development
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
-      - uses: android-actions/setup-android@v3
-        with:
-          packages: platform-tools
-      - run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
-      - id: vault
-        uses: hashicorp/vault-action@v3
-        with:
-          url: https://vault.downops.win
-          method: jwt
-          path: github-actions
-          role: wallettracker-mobile-ci-dev
-          jwtGithubAudience: https://vault.downops.win
-          exportToken: false
-          exportEnv: false
-          secrets: downops/data/apps/wallettracker/dev/mobile * | DEV_
-      - run: python3 delivery/build_dev.py
-        env:
-          DEV_SIGNING_READY: 'true'
-          SIGNING_INPUT_JSON: ${{ toJSON(steps.vault.outputs) }}
-      - uses: actions/upload-artifact@v4
-        with:
-          name: wallettracker-dev-${{ github.sha }}
-          path: |
-            app/build/outputs/apk/debug/*.apk
-            delivery/artifacts/dev-receipt.json
-          if-no-files-found: error
-          retention-days: 14
-
-  prod-signing-check:
-    needs: checks
-    if: startsWith(github.ref, 'refs/tags/v') && contains(github.ref_name, '-ci-check') && github.ref_protected && needs.checks.outputs.signing_ready == 'true'
-    runs-on: ubuntu-latest
-    environment: production
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
-      - uses: android-actions/setup-android@v3
-        with:
-          packages: platform-tools
-      - run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
-      - id: vault
-        uses: hashicorp/vault-action@v3
-        with:
-          url: https://vault.downops.win
-          method: jwt
-          path: github-actions
-          role: wallettracker-mobile-ci-prod
-          jwtGithubAudience: https://vault.downops.win
-          exportToken: false
-          exportEnv: false
-          secrets: downops/data/apps/wallettracker/prod/mobile * | PROD_
-      - run: python3 delivery/check_prod.py
-        env:
-          SIGNING_INPUT_JSON: ${{ toJSON(steps.vault.outputs) }}
-      - uses: actions/upload-artifact@v4
-        with:
-          name: production-signing-check-${{ github.sha }}
-          path: delivery/check-artifacts/production-check-receipt.json
-          if-no-files-found: error
-          retention-days: 7
-
-  publication-check:
-    needs: checks
-    if: startsWith(github.ref, 'refs/tags/v') && contains(github.ref_name, '-ci-check') && github.ref_protected
-    runs-on: ubuntu-latest
-    environment: production
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -157,19 +66,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - run: python3 delivery/check_publication.py
-        env:
-          GH_TOKEN: ${{ github.token }}
-      - uses: actions/upload-artifact@v4
-        with:
-          name: publication-check-${{ github.sha }}
-          path: delivery/check-artifacts/publication-check-receipt.json
-          if-no-files-found: error
-          retention-days: 7
+      - name: Verify exact release tag is on GitHub main before accessing secrets
+        run: PYTHONPATH=delivery python3 -c 'import os; from build_prod import validate_identity; validate_identity(os.environ)'
 
   prod-apk:
-    needs: checks
-    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-') && github.ref_protected && needs.checks.outputs.signing_ready == 'true'
+    needs: release-context
     runs-on: ubuntu-latest
     environment: production
     permissions:

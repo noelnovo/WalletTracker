@@ -56,6 +56,10 @@ class ProductionSigningTests(unittest.TestCase):
         self.assertIn('GH_TOKEN: ${{ github.token }}', publication)
         self.assertNotIn('id-token: write', publication)
         self.assertNotIn('GITHUB_RELEASE_TOKEN', workflow)
+        context = workflow.split('\n  release-context:\n', 1)[1].split('\n  prod-apk:\n', 1)[0]
+        self.assertIn('validate_identity(os.environ)', context)
+        self.assertNotIn('vault-action', context)
+        self.assertIn('needs: release-context', workflow.split('\n  prod-apk:\n', 1)[1].split('\n  publish-prod:\n', 1)[0])
 
     def test_check_tag_cannot_authorize_a_real_release(self):
         with patch.object(build_prod, 'command') as command:

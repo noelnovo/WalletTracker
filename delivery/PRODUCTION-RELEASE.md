@@ -9,11 +9,11 @@ See `GITHUB-MIGRATION.md` and the exact `github-actions-vault-plan.json`.
 The original production PKCS12 signer and distinct dev signer remain unchanged
 in `downops/apps/wallettracker/{prod,dev}/mobile`. The GitHub workflow uses OIDC
 through the existing `github-actions` mount and public verified-TLS Vault URL.
-New exact GitHub roles require authorized administrator configuration; old
-GitLab signing tests are not proof that the new GitHub login works.
+The owner applied the corrected GitHub roles; actual GitHub DEV and production
+login/read/signing tests passed. Old GitLab results are historical evidence only.
 
-`github-actions-status.json` keeps signing gated off until trust, roles and
-protections are verified. No recovery, self-grant, legacy broad-role workaround
+`github-actions-status.json` records the verified signing access. No recovery,
+self-grant, legacy broad-role workaround
 or key rotation is permitted. Preserve old records/grants until cutover and
 explicit retirement approval. Public production certificate SHA256:
 `60b988457cca109d8f3a1f3ad288f95648f9938990aeedff0dfc5ed479952b61`.
@@ -25,13 +25,17 @@ no Vault/OIDC/Actions runtime/publication credentials.
 
 ## Test without publishing
 
-- DEV uses its stable distinct key and uploads a GitHub Actions APK artifact.
-- A new immutable owner-protected `v3.0.0-ci-check.N` tag tests real production
-  login/signing/configuration and retains only a nonpublishable receipt; the
-  signed test APK is deleted.
-- The separate built-in-token publication check uploads a synthetic JSON asset
-  to one owned draft, verifies its digest and safely deletes that draft. It
-  never uploads an APK or publishes a release.
+Owner now requires MAIN-only releases: DEV has only secret-free validation and
+test reports. Automatic DEV signing/APK artifact and test-tag draft/signing jobs
+have been retired from the active workflow after their completed verification.
+The protected exact version tag is checked against MAIN before any Vault access.
+Historical check scripts/receipts are not production release authorization.
+
+- DEV no longer fetches signing keys or releases signed APK artifacts.
+- Completed DEV and production signing tests verified the original identities;
+  their signed test APK/draft jobs are no longer in the active workflow.
+- The completed built-in-token upload test verified a disposable JSON draft and
+  removed it. Historical validation receipts cannot authorize a real release.
 - Secret-free checks and unsigned compilation may run before OIDC is ready;
   skipped signing is never reported as a successful signing test.
 

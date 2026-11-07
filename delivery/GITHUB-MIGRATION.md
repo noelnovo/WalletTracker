@@ -1,62 +1,54 @@
-# GitHub Actions ownership
+# GitHub Actions owns MAIN-only releases
 
-Owner corrected the target: GitHub Actions builds, signs and publishes APKs.
-GitLab is a passive backup mirror, not a workflow runner. This supersedes the
-earlier GitLab-pipeline and server-side publication designs.
+GitHub is the authoritative source, workflow runner and APK download host.
+GitLab CI is disabled; its repositories are passive fast-forward backups.
 
-## Android
+## Current release policy
 
-`.github/workflows/android.yml` owns checks, compilation, stable DEV APKs,
-nonpublishing production signing/upload tests and protected production releases.
-`.gitlab-ci.yml` has `workflow: rules: when: never`; it includes no active jobs.
+`.github/workflows/android.yml` owns checks, compilation and production releases.
+DEV runs secret-free validation and uploads test reports only. The automatic
+DEV signed-APK job and check-tag draft/signing jobs were retired after verification.
 
-GitHub OIDC authenticates to `https://vault.downops.win` at `github-actions`.
-The exact new role plan is `github-actions-vault-plan.json`. An already-authorized
-administrator must inspect existing mount trust and configure those two roles;
-the current scoped operators cannot administer that mount. Do not recover root,
-self-grant, reuse the old broader role or modify signing keys to avoid this gate.
+An exact owner-protected version tag must be on GitHub MAIN. The `release-context`
+job verifies version, source and MAIN ancestry before any signing-secret access.
+Production signing and publication retain protected-environment owner approval.
+No release or signing job can run from a DEV branch or a `-ci-check` tag.
 
-Until trust/role verification, `delivery/github-actions-status.json` keeps
-`vault_signing_ready=false`. This reviewed source gate needs no repository-variable
-API permission. Secret-free
-checks/unsigned compilation and the built-in-token draft upload test can run;
-**signing is skipped, not falsely reported as passed**. Then enable the flag and
-test DEV plus a new immutable protected `v3.0.0-ci-check.N` tag. Old GitLab test
-results are historical and are not GitHub execution proof.
+## Verified authentication
 
-The production tag/environment controls, exact version/main ancestry, unchanged
-signer, recovery checkpoint and live backend/API-v2 gates remain in force.
-No production app deployment or database migration is part of this CI cutover.
+GitHub OIDC uses `github-actions` and verified TLS at `https://vault.downops.win`.
+The owner applied the corrected role bodies after checking existing trust.
+GitHub API confirmed immutable subjects with owner/repository IDs; actual DEV
+and production login/read/signing tests succeeded on source `b242d77…`.
+Roles, policy names, TTL/max900 and no-default restrictions are recorded in
+`github-actions-vault-plan.json`; original signing keys remain unchanged.
 
-Signing builders consume the Vault action's already-read, masked step outputs
-through `SIGNING_INPUT_JSON`. They do not make a duplicate public HTTP secret
-read or require an exported Vault token. The private JSON is removed before
-Gradle starts; production passwords are also removed from Gradle's environment.
+Builders consume the Vault action's already-read masked outputs via
+`SIGNING_INPUT_JSON`. No duplicate HTTP secret read or exported Vault token is
+required. Private JSON and all job tokens are removed before Gradle runs;
+production passwords are also withheld from Gradle.
 
-## GitHub Releases
+Publication uses built-in job-scoped `GITHUB_TOKEN` with `contents: write`.
+No GitHub upload PAT or publication Vault secret is needed. It checks the
+existing tag, publishable receipt, unchanged signer, checksums and live production
+API-v2 before publishing a verified draft. Validation receipts are rejected.
 
-Publication uses the built-in `GITHUB_TOKEN`, exposed only to a separate job with
-`contents: write`. Build/sign jobs have `contents: read` and `id-token: write`.
-Checkout never persists credentials. Gradle receives no Vault, OIDC, GitHub
-publication or Actions runtime tokens. No separate GitHub upload PAT is needed.
+## Application promotion remains separate
 
-`publication-check` creates one owned draft with a tiny synthetic JSON asset,
-verifies its digest and deletes only that unchanged draft. It never uploads an
-APK or publishes a release. Actual publication rejects validation receipts.
+CI-only workflow changes on MAIN do not promote the application or database.
+Before the actual APK release, preserve fresh encrypted backup/restore,
+write-freeze/checkpoint, schema/data safety and backend/API-v2 compatibility.
+See `PRODUCTION-RELEASE.md`; never restart a stale writer after new writes.
 
-## Backend and backup coordination
+## Passive backups and cleanup
 
-GitLab CE19.5.3 has no native pull mirroring. Existing authorized server-side
-backup sync can fetch public GitHub and push only explicit fast-forward refs to
-GitLab without exporting estate credentials to Actions. Never use force,
-deletion or `git push --mirror`; retain unrelated refs and all old credentials.
+GitLab CE has no native pull mirror. Existing authorized server-side sync fetches
+public GitHub and pushes explicit fast-forward MAIN/DEV/tag backups. No force,
+ref deletion, `--mirror` or estate credential export into GitHub CI is permitted.
 
-Backend GitLab MAIN is an ancestor of GitHub MAIN with an identical tree; any
-alignment must be verified fast-forward, not reset. Backend Argo still reads the
-GitLab repository. Coordinate its public GitHub HTTPS source/allowlist switch
-through reviewed GitOps, preserve manual production sync and existing readers
-until verification, and do not weaken required `python-tests`/`sonarqube` checks.
-
-Full cutover must also port backend delivery/scan OIDC roles, source writeback
-and network access. No missing permission or successful unsigned build may be
-presented as proof that those live delivery gates passed.
+Owner clarified cleanup includes only our migration temporaries: preserve
+financial recovery backups, GitLab mirrors, keys/data and shared operators.
+Inventory processes, dependencies and provenance before deleting files.
+Published release assets, Git/LFS history and active old Vault/image paths are
+not automatically leftovers. Backend Argo/security/delivery and Harbor target
+access must be verified before retiring their old sources.
