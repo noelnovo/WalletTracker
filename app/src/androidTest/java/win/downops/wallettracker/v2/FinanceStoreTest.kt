@@ -78,6 +78,63 @@ class FinanceStoreTest {
         store.close()
     }
 
+    @Test fun itemizedBillsRoundTripWithoutLosingAssignedExtras() {
+        val store = store()
+        val payload = JSONObject().put("amount_minor", 1500).put("description", "Dinner")
+            .put("participants", JSONArray().put("Alex").put("Sam")).put("paid_by", "Sam")
+            .put("extras", JSONArray().put(JSONObject().put("description", "Wine").put("amount_minor", 500).put("participant", "Alex")))
+            .put("shares", JSONArray().put(JSONObject().put("name", "Alex").put("amount_minor", 1000))
+                .put(JSONObject().put("name", "Sam").put("amount_minor", 500)))
+        val row = store.save("bill", payload)
+        val sent = store.pending()
+        val remote = JSONObject(row.toString()).put("version", 1).put("revision", 1)
+        val result = JSONObject().put("operation_id", sent.getJSONObject(0).getString("operation_id"))
+            .put("status", "applied").put("record", remote)
+        store.acknowledge(sent, JSONArray().put(result))
+        assertEquals(0, store.pendingCount())
+        val saved = store.rows().single().getJSONObject("payload")
+        assertEquals(500, saved.getJSONArray("extras").getJSONObject(0).getInt("amount_minor"))
+        assertEquals(1000, saved.getJSONArray("shares").getJSONObject(0).getInt("amount_minor"))
+        store.close()
+    }
+
+    @Test fun olderServerCannotSilentlyReplaceItemizedBillWithEqualShares() {
+        val store = store()
+        val payload = JSONObject().put("amount_minor", 1500).put("description", "Dinner")
+            .put("extras", JSONArray().put(JSONObject().put("description", "Wine").put("amount_minor", 500).put("participant", "Alex")))
+            .put("shares", JSONArray().put(JSONObject().put("name", "Alex").put("amount_minor", 1000))
+                .put(JSONObject().put("name", "Sam").put("amount_minor", 500)))
+        val row = store.save("bill", payload)
+        val sent = store.pending()
+        val equalPayload = JSONObject(payload.toString()).apply {
+            remove("extras")
+            put("shares", JSONArray().put(JSONObject().put("name", "Alex").put("amount_minor", 750))
+                .put(JSONObject().put("name", "Sam").put("amount_minor", 750)))
+        }
+        val remote = JSONObject(row.toString()).put("version", 1).put("revision", 1).put("payload", equalPayload)
+        val result = JSONObject().put("operation_id", sent.getJSONObject(0).getString("operation_id"))
+            .put("status", "applied").put("record", remote)
+        try { store.acknowledge(sent, JSONArray().put(result)); fail("An incompatible server must not discard extras") }
+        catch (error: ItemizedBillSyncUnavailable) {
+            assertEquals(row.getString("id"), error.recordId)
+            assertEquals(1, error.remoteVersion)
+        }
+        assertEquals(1, store.pendingCount())
+        assertEquals(1000, store.rows().single().getJSONObject("payload").getJSONArray("shares").getJSONObject(0).getInt("amount_minor"))
+        assertEquals(sent.getJSONObject(0).getString("operation_id"), store.pending().getJSONObject(0).getString("operation_id"))
+        store.retainIncompatibleBill(ItemizedBillSyncUnavailable(row.getString("id"), 1))
+        assertEquals(1, store.blockedItemizedBills())
+        assertEquals(0, store.pending().length())
+        assertFalse(store.rows().single().getBoolean("needs_review"))
+        store.retryItemizedBills()
+        assertEquals(0, store.blockedItemizedBills())
+        val retry = store.pending().getJSONObject(0)
+        assertEquals(1, retry.getInt("base_version"))
+        assertNotEquals(sent.getJSONObject(0).getString("operation_id"), retry.getString("operation_id"))
+        assertEquals(1000, retry.getJSONObject("payload").getJSONArray("shares").getJSONObject(0).getInt("amount_minor"))
+        store.close()
+    }
+
     @Test fun ciphertextCannotBeMovedBetweenRecords() {
         val vault = DeviceVault(context, "instrumentation-${UUID.randomUUID()}")
         val encrypted = vault.seal("secret", "record:A")

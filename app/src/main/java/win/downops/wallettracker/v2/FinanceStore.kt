@@ -7,6 +7,10 @@ import android.database.sqlite.SQLiteOpenHelper
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
+import java.io.IOException
+
+class ItemizedBillSyncUnavailable(val recordId: String, val remoteVersion: Int) :
+    IOException("Server update needed for itemized bills. Your split is saved on this phone.")
 
 /** One local database per server account. Only IDs/versions are stored unencrypted. */
 class FinanceStore(context: Context, account: String) : SQLiteOpenHelper(context,
@@ -36,7 +40,7 @@ class FinanceStore(context: Context, account: String) : SQLiteOpenHelper(context
                 val id = cursor.getString(0)
                 val row = JSONObject(vault.open(cursor.getString(1), "record:$id"))
                 row.put("has_conflict", !cursor.isNull(2))
-                row.put("needs_review", !cursor.isNull(3))
+                row.put("needs_review", !cursor.isNull(3) && cursor.getString(3) != "itemized_sync_unavailable")
                 if (includeDeleted || !row.optBoolean("deleted")) add(row)
             }
         }.sortedByDescending { it.optJSONObject("payload")?.optString("date", "") }
@@ -80,6 +84,32 @@ class FinanceStore(context: Context, account: String) : SQLiteOpenHelper(context
                 writableDatabase.update("records", ContentValues().apply { put("conflict", vault.seal(result.optJSONObject("remote")?.toString() ?: "null", "conflict:$id")) }, "id=?", arrayOf(id))
             } else {
                 val remote = result.getJSONObject("record")
+                // Older API-v2 servers discard extras and overwrite shares with an equal split.
+                // Fail before acknowledgement so the transaction retains the original outbox/data.
+                if (operation.getString("kind") == "bill" && !operation.optBoolean("deleted")) {
+                    val localPayload = operation.getJSONObject("payload")
+                    val extras = localPayload.optJSONArray("extras")
+                    if (extras != null && extras.length() > 0) {
+                        val remotePayload = remote.getJSONObject("payload")
+                        val remoteExtras = remotePayload.optJSONArray("extras")
+                        val shares = localPayload.getJSONArray("shares")
+                        val remoteShares = remotePayload.optJSONArray("shares")
+                        val sameExtras = remoteExtras != null && remoteExtras.length() == extras.length() &&
+                            (0 until extras.length()).all { index ->
+                                val expected = extras.getJSONObject(index); val actual = remoteExtras.getJSONObject(index)
+                                expected.optString("description") == actual.optString("description") &&
+                                    expected.getString("participant") == actual.optString("participant") &&
+                                    expected.getLong("amount_minor") == actual.optLong("amount_minor", -1)
+                            }
+                        val sameShares = remoteShares != null && remoteShares.length() == shares.length() &&
+                            (0 until shares.length()).all { index ->
+                                val expected = shares.getJSONObject(index); val actual = remoteShares.getJSONObject(index)
+                                expected.getString("name") == actual.optString("name") &&
+                                    expected.getLong("amount_minor") == actual.optLong("amount_minor", -1)
+                            }
+                        if (!sameExtras || !sameShares) throw ItemizedBillSyncUnavailable(id, remote.getInt("version"))
+                    }
+                }
                 val current = pendingFor(id)
                 if (current != null && current.getString("operation_id") != operation.getString("operation_id")) {
                     // A UI edit raced the request: keep it and rebase on our acknowledged write.
@@ -120,6 +150,20 @@ class FinanceStore(context: Context, account: String) : SQLiteOpenHelper(context
 
     @Synchronized fun cursor(): Long = readableDatabase.rawQuery("SELECT cursor FROM metadata WHERE id=1", null).use { it.moveToFirst(); it.getLong(0) }
     @Synchronized fun pendingCount(): Int = readableDatabase.rawQuery("SELECT COUNT(*) FROM records WHERE operation IS NOT NULL", null).use { it.moveToFirst(); it.getInt(0) }
+    @Synchronized fun blockedItemizedBills(): Int = readableDatabase.rawQuery("SELECT COUNT(*) FROM records WHERE blocked_reason='itemized_sync_unavailable'", null).use { it.moveToFirst(); it.getInt(0) }
+    @Synchronized fun retainIncompatibleBill(error: ItemizedBillSyncUnavailable) = transaction {
+        val row = rows(true).firstOrNull { it.getString("id") == error.recordId } ?: return@transaction
+        // The old server already committed a receipt. Rebase and issue a fresh operation
+        // before explicit retry, or its idempotency receipt would keep returning equal shares.
+        val remainingUndo = readableDatabase.rawQuery("SELECT not_before FROM records WHERE id=?", arrayOf(error.recordId)).use {
+            if (it.moveToFirst()) (it.getLong(0) - System.currentTimeMillis()).coerceAtLeast(0) else 0
+        }
+        putPending(JSONObject(row.toString()).put("version", error.remoteVersion), remainingUndo)
+        writableDatabase.update("records", ContentValues().apply { put("blocked_reason", "itemized_sync_unavailable") }, "id=?", arrayOf(error.recordId))
+    }
+    @Synchronized fun retryItemizedBills() {
+        writableDatabase.execSQL("UPDATE records SET blocked_reason=NULL WHERE blocked_reason='itemized_sync_unavailable'")
+    }
     @Synchronized fun remoteConflict(id: String): JSONObject? = readableDatabase.rawQuery("SELECT conflict FROM records WHERE id=?", arrayOf(id)).use {
         if (it.moveToFirst() && !it.isNull(0)) vault.open(it.getString(0), "conflict:$id").takeUnless { value -> value == "null" }?.let(::JSONObject) else null
     }

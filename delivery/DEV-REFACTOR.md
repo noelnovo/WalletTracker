@@ -3,19 +3,38 @@
 ## Runtime and UI
 
 The launcher is `v2/WalletActivity`: Material 3 day/night, expense/category
-editing, equal restaurant splits with exact integer cents, settings, lock,
+editing, restaurant splits with assigned extras and exact integer cents, settings, lock,
 logout, confirmed reset and six-second swipe/reset undo. Money is never split
 with binary floating point. Supported currencies are EUR, USD and GBP; totals
 are kept separate (no invented exchange rates). File import, CSV parsing, share
 handlers and the mobile bulk-import API are removed.
 
-UI rule: short labels, one primary action per view, compact rows and icon-led
-affordances. No marketing copy or instructional paragraphs. Dates use a picker;
-bill payers are selected from entered people; shares have a dedicated detail
-view. Conflicts compare readable cards, not JSON. Only destructive decisions
-get a brief confirmation; technical details live behind About. Fingerprint is
-an icon-only accessible toggle. Date/currency use aligned outlined fields with
-a calendar end icon, localized date display and the Material calendar dialog.
+UI rule: short labels, one primary action per view, compact rows and brief helper
+text where a choice needs explaining. Sign-in, registration and returning-user
+fingerprint unlock are separate views; fingerprint enrollment is a labelled
+checkbox. About is removed. Settings explain automatic account sync, wallet
+lock and old-data migration; migration is hidden when no source exists.
+Categories use a separate Add category action, not a fake list item.
+Dates use a picker. Outlined fields have aligned content padding and full-width
+children. Expense and bill editors have a scrollable body and fixed action footer
+with system-bar/IME insets; sensitive dialog windows retain FLAG_SECURE.
+Conflicts compare readable cards, including extras, not JSON.
+
+Bill entry uses one row per person, defaulting to two with optional names.
+Each extra has an optional label, a positive price and one assigned participant.
+The total minus all extras is divided equally, with remainder cents assigned in
+participant order; each person's extras are then added to that share. The payer
+is separately selected as the person who paid the whole bill. A live preview and
+saved detail view show shares and amounts owed to the payer. Legacy bills with
+no extras remain equal splits.
+
+The paired backend change recomputes shares from validated extras; client-sent
+shares are not trusted. **Deploy that backend before releasing the itemized UI.**
+If an older server drops extras/replaces shares, the client retains its local
+bill, rebases with a fresh operation ID and pauses that bill's automatic retries.
+Sync now explicitly retries after the server update; unrelated queued records
+can continue syncing. No database schema, authentication or SDK migration is
+required by this feature.
 
 `WalletModel` owns authenticated state and synchronization, `FinanceApi` owns
 HTTPS transport, `FinanceStore` owns durable local records/outbox/conflicts, and
@@ -73,7 +92,14 @@ TLS terminates at the internal Nginx Proxy Manager; the existing proxy-to-node
 hop is HTTP on the private network, not end-to-end TLS to the pod. No claim of
 application-layer E2EE or pinned certificates is made.
 
-## GitLab and signing
+## GitLab and signing — historical cutover notes
+
+The delivery/signing notes below describe the earlier cutover, not the active
+release process. Follow [PRODUCTION-RELEASE.md](PRODUCTION-RELEASE.md): GitHub is
+authoritative, DEV validates only, and protected MAIN version tags require one
+production approval before signing/publication. GitLab is a passive backup with
+CI disabled. Do not re-enable retired jobs, readiness gates or Vault-role plans
+from these historical notes.
 
 Pipeline logic is `.gitlab/ci/pipeline.yml`; the root file is only GitLab's
 three-line include entry point. Removing that last entry point would require a
@@ -123,14 +149,23 @@ the backend repository at `delivery/vault-dev-staging-receipt.json`.
 
 ```sh
 python3 delivery/verify_contract.py
-./gradlew testDebugUnitTest assembleDebug connectedDebugAndroidTest --no-daemon
-adb install -r app/build/outputs/apk/debug/app-debug.apk
+./gradlew testDebugUnitTest assembleDebug assembleDebugAndroidTest assembleRelease --no-daemon
+```
+
+Optional UI/storage checks must use a **disposable emulator**, not a phone with
+wallet data. Set `EMULATOR_SERIAL` to that emulator's `emulator-*` serial:
+
+```sh
+EMULATOR_SERIAL=emulator-5582
+adb -s "$EMULATOR_SERIAL" install -r app/build/outputs/apk/debug/app-debug.apk
+adb -s "$EMULATOR_SERIAL" install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+adb -s "$EMULATOR_SERIAL" shell am instrument -w -e class win.downops.wallettracker.v2.WalletUiTest,win.downops.wallettracker.v2.FinanceStoreTest win.downops.wallettracker.debug.test/androidx.test.runner.AndroidJUnitRunner
 ```
 
 Optional live private-network device check (no credentials or finance mutations):
 
 ```sh
-adb shell am instrument -w -e liveDevApi true win.downops.wallettracker.debug.test/androidx.test.runner.AndroidJUnitRunner
+adb -s "$EMULATOR_SERIAL" shell am instrument -w -e liveDevApi true win.downops.wallettracker.debug.test/androidx.test.runner.AndroidJUnitRunner
 ```
 
 The non-secret installation/live acceptance receipt is `delivery/dev-verification.json`.
@@ -139,3 +174,12 @@ Device tests cover encrypted persistence/account isolation, conflict decisions,
 durable undo, UI-edit/acknowledgement races and authenticated encryption's
 record binding. Real fingerprint interaction still needs owner acceptance; no
 biometric match is simulated or bypassed on the physical phone.
+
+`WalletUiTest` exercises registration navigation, aligned category input and a
+Save button with the IME actually visible, plus the €15/€5-extra split through
+the UI. Run it only on a disposable emulator: it uses synthetic records in that
+emulator's local wallet. Do not run its local-wallet mutation scenarios on a
+phone containing a user's wallet. `BillSplitterTest` runs without Android and
+covers exact rounding, optional extra labels, limits and invalid assignments.
+`FinanceStoreTest` also verifies incompatible-server preservation and explicit
+retry with a fresh operation ID.
