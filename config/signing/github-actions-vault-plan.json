@@ -1,0 +1,75 @@
+{
+  "status": "reviewed source plan; apply only through an already-authorized Vault administrator",
+  "owner_decision": "GitHub Actions is authoritative; GitLab is passive backup only",
+  "auth_mount": "github-actions",
+  "verify_existing_mount_without_overwriting_unrelated_trust": {
+    "issuer": "https://token.actions.githubusercontent.com",
+    "oidc_discovery_url": "https://token.actions.githubusercontent.com"
+  },
+  "audience": "https://vault.downops.win",
+  "workflow": "noelnovo/WalletTracker/.github/workflows/android.yml",
+  "repository_id": "909094292",
+  "repository_owner_id": "128699907",
+  "verified_immutable_subject_prefix": "repo:noelnovo@128699907/WalletTracker@909094292",
+  "preserve_old_roles_policies_and_signing_keys": true,
+  "no_recovery_or_operator_self_grant": true,
+  "roles": {
+    "wallettracker-mobile-ci-dev": {
+      "role_type": "jwt",
+      "user_claim": "sub",
+      "bound_audiences": ["https://vault.downops.win"],
+      "bound_subject": "repo:noelnovo@128699907/WalletTracker@909094292:environment:development",
+      "bound_claims_type": "glob",
+      "bound_claims": {
+        "repository_id": "909094292",
+        "repository_owner_id": "128699907",
+        "repository": "noelnovo/WalletTracker",
+        "environment": "development",
+        "ref": "refs/heads/dev",
+        "ref_type": "branch",
+        "workflow_ref": "noelnovo/WalletTracker/.github/workflows/android.yml@refs/heads/dev",
+        "event_name": ["push", "workflow_dispatch"]
+      },
+      "token_policies": ["wallettracker-android-ci-dev"],
+      "token_no_default_policy": true,
+      "token_type": "batch",
+      "token_ttl": 900,
+      "token_max_ttl": 900
+    },
+    "wallettracker-mobile-ci-prod": {
+      "role_type": "jwt",
+      "user_claim": "sub",
+      "bound_audiences": ["https://vault.downops.win"],
+      "bound_subject": "repo:noelnovo@128699907/WalletTracker@909094292:environment:production",
+      "bound_claims_type": "glob",
+      "bound_claims": {
+        "repository_id": "909094292",
+        "repository_owner_id": "128699907",
+        "repository": "noelnovo/WalletTracker",
+        "environment": "production",
+        "ref": "refs/tags/v*",
+        "ref_type": "tag",
+        "workflow_ref": "noelnovo/WalletTracker/.github/workflows/android.yml@refs/tags/v*",
+        "event_name": ["push", "workflow_dispatch"]
+      },
+      "token_policies": ["wallettracker-android-ci-prod"],
+      "token_no_default_policy": true,
+      "token_type": "batch",
+      "token_ttl": 900,
+      "token_max_ttl": 900
+    }
+  },
+  "verify_existing_policy_bodies_exactly": {
+    "wallettracker-android-ci-dev": "path \"downops/data/apps/wallettracker/dev/mobile\" { capabilities = [\"read\"] }",
+    "wallettracker-android-ci-prod": "path \"downops/data/apps/wallettracker/prod/mobile\" { capabilities = [\"read\"] }"
+  },
+  "github_controls_before_signing_ready": [
+    "Protect v* tags against creation/update/deletion except the approved owner/admin release operator",
+    "development environment accepts only the dev branch",
+    "production environment accepts only v* tags and owner-reviewed jobs",
+    "Disable obsolete ci.yml/cd.yml workflows, not the new android.yml workflow",
+    "Set config/ci/github-actions-status.json vault_signing_ready=true by reviewed source commit only after the administrator verifies exact trust, claims and policies; then run actual dev and nonpublishing production checks"
+  ],
+  "publication": "Built-in job-scoped GITHUB_TOKEN with contents:write; no external GitHub PAT or publication Vault role is required",
+  "production_certificate_public_sha256": "60b988457cca109d8f3a1f3ad288f95648f9938990aeedff0dfc5ed479952b61"
+}

@@ -10,6 +10,7 @@ import android.graphics.drawable.ColorDrawable
 import android.net.ConnectivityManager
 import android.net.Network
 import android.os.Bundle
+import android.os.Parcelable
 import android.text.InputType
 import android.text.Editable
 import android.text.TextWatcher
@@ -49,6 +50,10 @@ import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
 import com.google.android.material.textfield.MaterialAutoCompleteTextView
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CancellationException
 import org.json.JSONArray
 import org.json.JSONObject
 import win.downops.wallettracker.BuildConfig
@@ -71,6 +76,12 @@ class WalletActivity : AppCompatActivity() {
     private lateinit var root: LinearLayout
     private lateinit var content: LinearLayout
     private lateinit var contentFrame: FrameLayout
+    private lateinit var pageHost: FrameLayout
+    private data class Page(val frame: FrameLayout, val body: LinearLayout)
+    private val pages = mutableMapOf<Int, Page>()
+    private val listPositions = mutableMapOf<Int, Parcelable>()
+    private var settingsScrollY = 0
+    private val afterDataLoad = mutableListOf<() -> Unit>()
     private val design by lazy { WalletDesign(this) }
     private var screen = 1
     private var showingLogin = false
@@ -81,6 +92,22 @@ class WalletActivity : AppCompatActivity() {
     private var activeSnackbar: Snackbar? = null
     private var migrationCheckedForAccount: String? = null
     private var legacyDataAvailable = false
+    private var navigation: BottomNavigationView? = null
+    private var pageTitle: TextView? = null
+    private var statusAction: MaterialButton? = null
+    private var settingsStatus: TextView? = null
+    private var shellStore: FinanceStore? = null
+    private var renderedScreen = -1
+    private var loadedRevision = -1
+    private var requestedRevision = -1
+    private var dataLoad: Job? = null
+    private var allRows = emptyList<JSONObject>()
+    private var pendingChanges = 0
+    private lateinit var unlockGate: UnlockPromptGate
+    private var automaticUnlockEligible = false
+    private var biometricPrompt: BiometricPrompt? = null
+    private var biometricAttempt = 0
+    private var authenticationJob: Job? = null
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) { runOnUiThread { model.syncSoon() } }
     }
@@ -99,11 +126,16 @@ class WalletActivity : AppCompatActivity() {
             view.setPadding(bars.left, bars.top, bars.right, bars.bottom); insets
         }
         screen = savedInstanceState?.getInt("screen", 1) ?: 1
+        if (model.unlocked) {
+            for (tab in 1..2) savedInstanceState?.getParcelable<Parcelable>("scroll-$tab")?.let { listPositions[tab] = it }
+            settingsScrollY = savedInstanceState?.getInt("settings-scroll", 0) ?: 0
+        }
+        unlockGate = UnlockPromptGate(savedInstanceState?.getBoolean("unlock-attempted", false) ?: false)
         render()
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 launch { model.changes.collect { if (model.unlocked || !showingLogin) render() } }
-                launch { model.status.collect { if (model.unlocked) render() } }
+                launch { model.status.collect { if (model.unlocked) updateStatus() } }
             }
         }
         val connectivity = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -111,14 +143,30 @@ class WalletActivity : AppCompatActivity() {
         networkRegistered = true
     }
 
-    override fun onSaveInstanceState(outState: Bundle) { outState.putInt("screen", screen); super.onSaveInstanceState(outState) }
+    override fun onSaveInstanceState(outState: Bundle) {
+        rememberScrollPositions()
+        listPositions.forEach { (tab, position) -> outState.putParcelable("scroll-$tab", position) }
+        outState.putInt("settings-scroll", settingsScrollY)
+        outState.putInt("screen", screen); outState.putBoolean("unlock-attempted", unlockGate.attempted)
+        super.onSaveInstanceState(outState)
+    }
+    override fun onResume() { super.onResume(); promptAutomatically() }
     override fun onStop() {
+        authenticationJob?.cancel(); authenticationJob = null
+        biometricAttempt++
+        biometricPrompt?.cancelAuthentication(); biometricPrompt = null
+        unlockGate.finished()
         if (!isChangingConfigurations) {
+            unlockGate.foregroundEnded()
             activeSnackbar?.dismiss(); activeSnackbar = null
             activeDialogs.toList().forEach { it.dismiss() }
             (supportFragmentManager.findFragmentByTag("wallet-date") as? androidx.fragment.app.DialogFragment)?.dismissAllowingStateLoss()
             if (model.unlocked) {
                 showingLogin = false; visibleRows = emptyList(); categoryNames = emptyMap()
+                dataLoad?.cancel(); allRows = emptyList(); pendingChanges = 0
+                shellStore = null; navigation = null; renderedScreen = -1; pages.clear(); settingsStatus = null
+                afterDataLoad.clear()
+                listPositions.clear(); settingsScrollY = 0
                 root.removeAllViews(); model.lock()
             }
         }
@@ -232,23 +280,73 @@ class WalletActivity : AppCompatActivity() {
         }
         return dialog
     }
-    private fun task(block: suspend () -> Unit) {
-        lifecycleScope.launch { try { block() } catch (error: Exception) { message(error.message ?: "Unable to finish. Your local data is retained.") } }
+    private fun task(block: suspend () -> Unit): Job = lifecycleScope.launch {
+        try { block() }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (error: Exception) { message(error.message ?: "Unable to finish. Your local data is retained.") }
     }
 
-    private fun render() {
+    private fun render(refreshData: Boolean = false) {
         if (!model.unlocked) {
             migrationCheckedForAccount = null
             legacyDataAvailable = false
             activeSnackbar?.dismiss(); activeSnackbar = null
             visibleRows = emptyList(); categoryNames = emptyMap()
+            dataLoad?.cancel(); allRows = emptyList(); pendingChanges = 0
+            shellStore = null; navigation = null; loadedRevision = -1; requestedRevision = -1; renderedScreen = -1
+            pages.clear(); settingsStatus = null
+            afterDataLoad.clear()
+            listPositions.clear(); settingsScrollY = 0
             if (!showingLogin) login()
             return
         }
         showingLogin = false
-        visibleRows = model.store!!.rows()
-        categoryNames = visibleRows.filter { it.getString("kind") == "category" }
-            .associate { it.getString("id") to it.getJSONObject("payload").getString("name") }
+        automaticUnlockEligible = false
+        val store = model.store!!
+        if (shellStore !== store || navigation == null) buildShell(store)
+        updateStatus()
+        if (renderedScreen != screen) showScreen()
+        val revision = model.changes.value
+        if (refreshData || requestedRevision != revision) {
+            requestedRevision = revision
+            dataLoad?.cancel()
+            val previousRows = allRows
+            val previousPending = pendingChanges
+            val firstLoad = loadedRevision < 0
+            dataLoad = lifecycleScope.launch {
+                val snapshot = try {
+                    withContext(Dispatchers.IO) {
+                        val rows = store.rows(true)
+                        val pending = store.pendingCount()
+                        Triple(rows, pending, firstLoad || previousPending != pending ||
+                            previousRows.map(JSONObject::toString) != rows.map(JSONObject::toString))
+                    }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    requestedRevision = -1
+                    if (model.unlocked && model.store === store) message("Unable to load your wallet. Your data is retained.")
+                    return@launch
+                }
+                if (!model.unlocked || model.store !== store || shellStore !== store) return@launch
+                val changed = snapshot.third
+                loadedRevision = revision; allRows = snapshot.first; pendingChanges = snapshot.second
+                pages.values.forEach { it.frame.tag = "wallet-page-revision:$revision" }
+                visibleRows = allRows.filter { !it.optBoolean("deleted") }
+                categoryNames = visibleRows.filter { it.getString("kind") == "category" }
+                    .associate { it.getString("id") to it.getJSONObject("payload").getString("name") }
+                if (changed) { rememberScrollPositions(); pages.clear(); settingsStatus = null; showScreen() }
+                val callbacks = afterDataLoad.toList(); afterDataLoad.clear()
+                callbacks.forEach { it() }
+                offerLegacyMigration()
+            }
+        }
+    }
+
+    private fun buildShell(store: FinanceStore) {
+        shellStore = store; loadedRevision = -1; requestedRevision = -1; renderedScreen = -1
+        allRows = emptyList(); visibleRows = emptyList(); categoryNames = emptyMap(); pendingChanges = 0
+        pages.clear(); settingsStatus = null
         root.removeAllViews()
         val header = column()
         val brand = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
@@ -257,7 +355,70 @@ class WalletActivity : AppCompatActivity() {
             LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(8) })
         header.addView(brand)
         val titleRow = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        titleRow.addView(design.text(when (screen) { 2 -> "Split bills"; 3 -> "Settings"; else -> "Expenses" }, 30f, ink, true), LinearLayout.LayoutParams(0, -2, 1f))
+        pageTitle = design.text("", 30f, ink, true)
+        titleRow.addView(pageTitle, LinearLayout.LayoutParams(0, -2, 1f))
+        statusAction = textButton("") { selectScreen(3) }.apply { textSize = 12f; setTextColor(muted); setPadding(dp(8), 0, dp(8), 0) }
+        if (resources.configuration.fontScale < 1.3f) titleRow.addView(statusAction)
+        header.addView(titleRow)
+        val readableWidth = minOf(resources.displayMetrics.widthPixels, dp(640))
+        root.addView(header, LinearLayout.LayoutParams(readableWidth, -2).apply { gravity = Gravity.CENTER_HORIZONTAL })
+        pageHost = FrameLayout(this)
+        root.addView(pageHost, LinearLayout.LayoutParams(readableWidth, 0, 1f).apply { gravity = Gravity.CENTER_HORIZONTAL })
+        val nav = BottomNavigationView(this)
+        nav.menu.add(0, 1, 0, "Expenses").setIcon(R.drawable.wallet_ic_expense)
+        nav.menu.add(0, 2, 1, "Bills").setIcon(R.drawable.wallet_ic_people)
+        nav.menu.add(0, 3, 2, "Settings").setIcon(R.drawable.wallet_ic_settings)
+        nav.setBackgroundColor(design.cardSurface)
+        val navigationTint = ColorStateList(arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()), intArrayOf(primary, muted))
+        nav.itemIconTintList = navigationTint; nav.itemTextColor = navigationTint
+        nav.isItemHorizontalTranslationEnabled = false
+        nav.labelVisibilityMode = com.google.android.material.navigation.NavigationBarView.LABEL_VISIBILITY_LABELED
+        nav.itemActiveIndicatorColor = ColorStateList.valueOf(design.color(com.google.android.material.R.attr.colorSurfaceContainerHigh))
+        nav.selectedItemId = screen
+        navigation = nav
+        nav.setOnItemSelectedListener { item -> selectScreen(item.itemId, updateNavigation = false); true }
+        nav.setOnItemReselectedListener { /* Keep the current page and scroll position. */ }
+        root.addView(nav)
+    }
+
+    private fun selectScreen(value: Int, updateNavigation: Boolean = true) {
+        if (screen == value) return
+        screen = value
+        if (updateNavigation && navigation?.selectedItemId != value) navigation?.selectedItemId = value
+        showScreen()
+    }
+
+    private fun showScreen() {
+        if (!model.unlocked || shellStore !== model.store) return
+        renderedScreen = screen
+        pageTitle?.text = when (screen) { 2 -> "Split bills"; 3 -> "Settings"; else -> "Expenses" }
+        pageHost.removeAllViews()
+        pages[screen]?.let {
+            contentFrame = it.frame; content = it.body
+            pageHost.addView(contentFrame)
+            return
+        }
+        contentFrame = FrameLayout(this)
+        contentFrame.tag = "wallet-page-revision:$loadedRevision"
+        content = column().apply { setPadding(dp(20), 0, dp(20), 0) }
+        contentFrame.addView(content, FrameLayout.LayoutParams(-1, -1))
+        pageHost.addView(contentFrame, FrameLayout.LayoutParams(-1, -1))
+        pages[screen] = Page(contentFrame, content)
+        if (loadedRevision < 0) content.addView(text("Loading your wallet…", 14f, muted))
+        else when (screen) { 2 -> finances("bill"); 3 -> settings(); else -> finances("expense") }
+    }
+
+    /** Save positions only, never wallet contents, credentials, or form drafts. */
+    private fun rememberScrollPositions() {
+        pages.forEach { (tab, page) ->
+            when (val scroll = page.body.getChildAt(0)) {
+                is RecyclerView -> scroll.layoutManager?.onSaveInstanceState()?.let { listPositions[tab] = it }
+                is ScrollView -> settingsScrollY = scroll.scrollY
+            }
+        }
+    }
+
+    private fun updateStatus() {
         val status = model.status.value
         val statusLabel = when {
             model.account == "local" -> "On this phone"
@@ -267,34 +428,14 @@ class WalletActivity : AppCompatActivity() {
             status == "Pending" -> "Pending"
             else -> "Needs attention"
         }
-        if (resources.configuration.fontScale < 1.3f) titleRow.addView(textButton(statusLabel) { screen = 3; render() }.apply {
-            textSize = 12f; contentDescription = "Wallet status: $statusLabel. Open settings"
-            setPadding(dp(8), 0, dp(8), 0)
-        })
-        header.addView(titleRow)
-        val readableWidth = minOf(resources.displayMetrics.widthPixels, dp(640))
-        root.addView(header, LinearLayout.LayoutParams(readableWidth, -2).apply { gravity = Gravity.CENTER_HORIZONTAL })
-        contentFrame = FrameLayout(this)
-        content = column().apply { setPadding(dp(20), 0, dp(20), 0) }
-        contentFrame.addView(content, FrameLayout.LayoutParams(-1, -1))
-        root.addView(contentFrame, LinearLayout.LayoutParams(readableWidth, 0, 1f).apply { gravity = Gravity.CENTER_HORIZONTAL })
-        when (screen) { 2 -> finances("bill"); 3 -> settings(); else -> finances("expense") }
-        val nav = BottomNavigationView(this)
-        nav.menu.add(0, 1, 0, "Expenses").setIcon(R.drawable.wallet_ic_expense)
-        nav.menu.add(0, 2, 1, "Bills").setIcon(R.drawable.wallet_ic_people)
-        nav.menu.add(0, 3, 2, "Settings").setIcon(R.drawable.wallet_ic_settings)
-        nav.setBackgroundColor(design.cardSurface)
-        val navigationTint = ColorStateList(arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()), intArrayOf(primary, muted))
-        nav.itemIconTintList = navigationTint; nav.itemTextColor = navigationTint
-        nav.itemActiveIndicatorColor = ColorStateList.valueOf(design.container)
-        nav.selectedItemId = screen
-        nav.setOnItemSelectedListener { item -> screen = item.itemId; render(); true }
-        root.addView(nav)
-        offerLegacyMigration()
+        statusAction?.text = statusLabel
+        statusAction?.contentDescription = "Wallet status: $statusLabel. Open settings"
+        settingsStatus?.text = if (model.account == "local") "This wallet stays on your phone. It doesn't sync." else status
     }
 
     private fun login(createAccount: Boolean = false, usePassword: Boolean = false) {
         showingLogin = true
+        automaticUnlockEligible = false
         root.removeAllViews()
         val page = column().apply { gravity = Gravity.CENTER_VERTICAL; setPadding(dp(24), dp(28), dp(24), dp(24)) }
         val body = design.column(20)
@@ -315,13 +456,15 @@ class WalletActivity : AppCompatActivity() {
         val legacyCredentials = model.legacyCredentials()
         val biometricAvailable = BiometricManager.from(this).canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG) == BiometricManager.BIOMETRIC_SUCCESS
         if (!createAccount && !usePassword && biometricAvailable && (model.wrappedRefresh != null || legacyCredentials != null)) {
+            automaticUnlockEligible = true
             body.addView(design.text("Welcome back", 28f, ink, true))
             body.addView(text(model.savedName.ifEmpty { legacyCredentials?.username.orEmpty() }, 16f, muted))
             body.addView(text("Unlock to view your wallet.", 14f, muted).apply { setPadding(0, dp(8), 0, dp(20)) })
             body.addView(button("Unlock wallet") {
-                if (model.wrappedRefresh != null) unlock() else legacyCredentials?.let(::unlockLegacy)
+                if (model.wrappedRefresh != null) unlock() else legacyCredentials?.let { unlockLegacy(it) }
             }.apply { setIconResource(R.drawable.ic_fingerprint) }, LinearLayout.LayoutParams(-1, -2))
             page.addView(textButton("Use password") { login(usePassword = true) }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
+            root.post { promptAutomatically() }
             return
         }
         body.addView(design.text(if (createAccount) "Create account" else "Sign in", 28f, ink, true))
@@ -344,7 +487,7 @@ class WalletActivity : AppCompatActivity() {
             if (createAccount && username.text.toString().trim().length !in 3..128) { username.error = "3–128 characters"; return@button }
             if (createAccount && password.text.toString().length !in 12..1024) { password.error = "12–1024 characters"; return@button }
             signIn.isEnabled = false
-            task {
+            authenticationJob = task {
                 try {
                     if (createAccount) model.register(username.text.toString().trim(), password.text.toString())
                     model.login(username.text.toString().trim(), password.text.toString(), remember.isChecked)
@@ -369,31 +512,50 @@ class WalletActivity : AppCompatActivity() {
         }.apply { setTextColor(muted) }, LinearLayout.LayoutParams(-1, -2))
     }
 
-    private fun unlock() {
-        val id = model.savedAccount ?: return
-        val wrapped = model.wrappedRefresh ?: return
+    private fun promptAutomatically() {
+        if (!::unlockGate.isInitialized || isFinishing || isDestroyed) return
+        val eligible = showingLogin && automaticUnlockEligible && !model.unlocked
+        if (!unlockGate.automatic(eligible, lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))) return
+        if (model.wrappedRefresh != null) unlock(automatic = true)
+        else model.legacyCredentials()?.let { unlockLegacy(it, automatic = true) } ?: unlockGate.finished()
+    }
+
+    private fun unlock(automatic: Boolean = false) {
+        val id = model.savedAccount ?: run { unlockGate.finished(); return }
+        val wrapped = model.wrappedRefresh ?: run { unlockGate.finished(); return }
+        if (!automatic && !unlockGate.manual()) return
+        val attempt = ++biometricAttempt
         try {
             val cipher = DeviceVault(this, id).unlockCipher()
             val prompt = BiometricPrompt(this, ContextCompat.getMainExecutor(this), object : BiometricPrompt.AuthenticationCallback() {
                 override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                    task {
+                    if (attempt != biometricAttempt) return
+                    unlockGate.finished()
+                    if (!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return
+                    authenticationJob = task {
                         val raw = String(requireNotNull(result.cryptoObject?.cipher).doFinal(android.util.Base64.decode(wrapped, android.util.Base64.NO_WRAP)))
                         model.unlock(id, raw)
                         render()
                     }
                 }
                 override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                    if (attempt != biometricAttempt) return
+                    unlockGate.finished()
+                    if (!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return
                     if (errorCode == BiometricPrompt.ERROR_NEGATIVE_BUTTON) login(usePassword = true) else message(errString.toString())
                 }
             })
             val info = BiometricPrompt.PromptInfo.Builder().setTitle("Unlock your wallet")
                 .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
                 .setNegativeButtonText("Use password").build()
+            biometricPrompt = prompt
             prompt.authenticate(info, BiometricPrompt.CryptoObject(cipher))
-        } catch (_: Exception) { login(usePassword = true); message("Fingerprint unavailable. Sign in again.") }
+        } catch (_: Exception) { unlockGate.finished(); login(usePassword = true); message("Fingerprint unavailable. Sign in again.") }
     }
 
-    private fun unlockLegacy(credentials: LegacyUpgrade.Credentials) {
+    private fun unlockLegacy(credentials: LegacyUpgrade.Credentials, automatic: Boolean = false) {
+        if (!automatic && !unlockGate.manual()) return
+        val attempt = ++biometricAttempt
         try {
             val key = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.getKey("USER_KEY", null) as SecretKey
             val cipher = Cipher.getInstance("AES/CBC/PKCS7Padding").apply {
@@ -401,7 +563,10 @@ class WalletActivity : AppCompatActivity() {
             }
             val prompt = BiometricPrompt(this, ContextCompat.getMainExecutor(this), object : BiometricPrompt.AuthenticationCallback() {
                 override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                    task {
+                    if (attempt != biometricAttempt) return
+                    unlockGate.finished()
+                    if (!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return
+                    authenticationJob = task {
                         val bytes = requireNotNull(result.cryptoObject?.cipher).doFinal(android.util.Base64.decode(credentials.ciphertext, android.util.Base64.NO_WRAP))
                         try {
                             val parts = bytes.toString(Charsets.UTF_8).split(';', limit = 2)
@@ -412,13 +577,17 @@ class WalletActivity : AppCompatActivity() {
                     }
                 }
                 override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                    if (attempt != biometricAttempt) return
+                    unlockGate.finished()
+                    if (!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return
                     if (errorCode == BiometricPrompt.ERROR_NEGATIVE_BUTTON) login(usePassword = true) else message(errString.toString())
                 }
             })
+            biometricPrompt = prompt
             prompt.authenticate(BiometricPrompt.PromptInfo.Builder().setTitle("Unlock your wallet")
                 .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
                 .setNegativeButtonText("Use password").build(), BiometricPrompt.CryptoObject(cipher))
-        } catch (_: Exception) { login(usePassword = true); message("Fingerprint unavailable. Sign in again.") }
+        } catch (_: Exception) { unlockGate.finished(); login(usePassword = true); message("Fingerprint unavailable. Sign in again.") }
     }
 
     private fun offerLegacyMigration() {
@@ -429,7 +598,10 @@ class WalletActivity : AppCompatActivity() {
             val snapshot = model.legacySnapshot()
             if (!model.unlocked || model.account != account) return@task
             val available = snapshot != null
-            if (legacyDataAvailable != available) { legacyDataAvailable = available; render() }
+            if (legacyDataAvailable != available) {
+                legacyDataAvailable = available; pages.remove(3)
+                if (screen == 3) showScreen()
+            }
             if (snapshot == null) return@task
             val target = if (account == "local") "Local wallet" else model.savedName
             val details = "${snapshot.expenses} expenses · ${snapshot.categories} categories" +
@@ -468,6 +640,7 @@ class WalletActivity : AppCompatActivity() {
         }
         val adapter = RecordAdapter(rows, overview)
         list.adapter = adapter
+        listPositions[screen]?.let { list.layoutManager?.onRestoreInstanceState(it) }
         ItemTouchHelper(object : ItemTouchHelper.SimpleCallback(0, ItemTouchHelper.LEFT) {
             override fun getSwipeDirs(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder) = if (viewHolder.itemViewType == 0) 0 else super.getSwipeDirs(recyclerView, viewHolder)
             override fun onMove(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder, target: RecyclerView.ViewHolder) = false
@@ -546,7 +719,7 @@ class WalletActivity : AppCompatActivity() {
             labels.addView(text(detail, 12f, muted).apply { maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END })
             val amount = money(payload.optLong("amount_minor"), payload.optString("currency", "EUR"))
             val largeText = resources.configuration.fontScale >= 1.3f || resources.configuration.screenWidthDp < 360
-            if (largeText) labels.addView(design.text(amount, 20f, primary, true))
+            if (largeText) labels.addView(design.text(amount, 20f, ink, true))
             line.addView(labels, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(12) })
             if (!largeText) line.addView(design.text(amount, 18f, ink, true).apply { setPadding(dp(8), 0, 0, 0) })
             val cardBody = design.column(16).apply { addView(line) }
@@ -601,7 +774,11 @@ class WalletActivity : AppCompatActivity() {
         }
         dialog = formDialog(if (row == null) "New category" else "Edit category", body, "Save category") {
             if (name.text.isNullOrBlank() || name.text!!.length > 80) name.error = "Enter 1–80 characters"
-            else { model.store!!.save("category", JSONObject().put("name", name.text.toString().trim()), row); model.changed(); render(); dialog.dismiss(); onSaved?.invoke() }
+            else {
+                model.store!!.save("category", JSONObject().put("name", name.text.toString().trim()), row)
+                if (onSaved != null) afterDataLoad.add(onSaved)
+                model.changed(); render(); dialog.dismiss()
+            }
         }
         showDialog(dialog)
     }
@@ -708,7 +885,7 @@ class WalletActivity : AppCompatActivity() {
         if (row.optBoolean("has_conflict")) { conflict(row); render(); return }
         val store = model.store!!
         store.save(row.getString("kind"), row.getJSONObject("payload"), row, deleted = true, delay = 6500)
-        render()
+        render(refreshData = true)
         Snackbar.make(root, "Deleted", 6000).setAction("Undo") {
             if (!model.unlocked || model.store !== store) return@setAction
             val latest = store.rows(true).first { it.getString("id") == row.getString("id") }
@@ -793,6 +970,7 @@ class WalletActivity : AppCompatActivity() {
 
     private fun settings() {
         val scroll = ScrollView(this); val body = column().apply { setPadding(0, 0, 0, dp(16)) }; scroll.addView(body); content.addView(scroll)
+        scroll.post { scroll.scrollTo(0, settingsScrollY) }
         val identity = design.column(20).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         identity.addView(design.badge(R.drawable.wallet_ic_wallet, 52))
         identity.addView(design.column().apply {
@@ -804,11 +982,12 @@ class WalletActivity : AppCompatActivity() {
         val categoryCount = categoryRows().size
         val walletRows = mutableListOf<View>(design.actionRow("Categories", "$categoryCount ${if (categoryCount == 1) "category" else "categories"} · organize your expenses", R.drawable.wallet_ic_category) { categories() })
         if (model.account != "local") {
-            walletRows.add(design.actionRow("Sync now", "${model.store!!.pendingCount()} waiting · automatically syncs while open", R.drawable.wallet_ic_sync) { model.retrySync() })
+            walletRows.add(design.actionRow("Sync now", "$pendingChanges waiting · automatically syncs while open", R.drawable.wallet_ic_sync) { model.retrySync() })
         }
         body.addView(design.group(*walletRows.toTypedArray()))
-        body.addView(text(if (model.account == "local") "This wallet stays on your phone. It doesn't sync." else model.status.value, 13f, muted).apply { setPadding(dp(16), 0, dp(16), dp(4)) })
-        val conflicts = model.store!!.rows(true).filter { it.optBoolean("has_conflict") }
+        settingsStatus = text(if (model.account == "local") "This wallet stays on your phone. It doesn't sync." else model.status.value, 13f, muted).apply { setPadding(dp(16), 0, dp(16), dp(4)) }
+        body.addView(settingsStatus)
+        val conflicts = allRows.filter { it.optBoolean("has_conflict") }
         val review = visibleRows.filter { it.optBoolean("needs_review") }
         if (conflicts.isNotEmpty() || review.isNotEmpty()) body.addView(design.heading("Needs your attention"))
         conflicts.forEach { row -> body.addView(design.group(design.actionRow(
@@ -852,7 +1031,7 @@ class WalletActivity : AppCompatActivity() {
                     if (model.store!!.rows(true).any { it.optBoolean("has_conflict") }) { message("Resolve conflicts before resetting"); return@setPositiveButton }
                     val store = model.store!!
                     records.forEach { store.save(it.getString("kind"), it.getJSONObject("payload"), it, deleted = true, delay = 6500) }
-                    render()
+                    render(refreshData = true)
                     Snackbar.make(root, "${records.size} deleted", 6000).setAction("Undo") {
                         if (!model.unlocked || model.store !== store) return@setAction
                         records.forEach { old -> val latest = store.rows(true).first { it.getString("id") == old.getString("id") }; store.save(old.getString("kind"), old.getJSONObject("payload"), latest) }

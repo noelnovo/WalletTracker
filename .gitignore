@@ -2,6 +2,9 @@
 *.iml
 .gradle/
 build/
+# Categorized automation helpers are source, not Gradle output.
+!scripts/build/
+!scripts/build/*.py
 captures/
 .externalNativeBuild/
 .cxx/
@@ -39,6 +42,7 @@ google-services.json
 
 # Kotlin specific
 *.kotlin_module
+.kotlin/
 
 # Jetpack Compose tooling
 *.db
@@ -48,5 +52,4 @@ google-services.json
 .gradle-ci/
 __pycache__/
 .prod-signing-*/
-delivery/artifacts/
-delivery/check-artifacts/
+artifacts/
