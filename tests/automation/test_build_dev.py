@@ -74,7 +74,7 @@ class DevSigningTests(unittest.TestCase):
         self.assertNotIn('KEY_PASSWORD', plan['required_keys'])
 
     def test_dev_is_validation_only_and_does_not_release_signed_apks(self):
-        workflow = (build_dev.ROOT / '.github/workflows/android.yml').read_text()
+        workflow = (build_dev.ROOT / '.github/workflows/validation.yml').read_text()
         self.assertNotIn('  dev-apk:', workflow)
         self.assertNotIn('role: wallettracker-mobile-ci-dev', workflow)
         self.assertNotIn('  publication-check:', workflow)

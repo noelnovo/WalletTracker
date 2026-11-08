@@ -1,63 +1,29 @@
-name: WalletTracker Android
+name: WalletTracker production release
 
 on:
   push:
-    branches: [dev, main]
     tags: ['v*']
-  pull_request:
-    branches: [dev, main]
-  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: wallettracker-android-${{ github.ref }}
+  group: wallettracker-release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  checks:
-    runs-on: ubuntu-latest
-    outputs:
-      signing_ready: ${{ steps.gates.outputs.signing_ready }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
-      - run: python3 -m scripts.ci.verify_contract
-      - run: python3 -m unittest discover -s tests/automation -p 'test_*.py'
-      - id: gates
-        run: python3 -c 'import json,os; value=json.load(open("config/ci/github-actions-status.json"))["vault_signing_ready"]; assert type(value) is bool; open(os.environ["GITHUB_OUTPUT"],"a").write("signing_ready=" + str(value).lower() + "\n")'
-
-  unsigned-build:
-    needs: checks
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
-      - uses: android-actions/setup-android@v3
-        with:
-          packages: platform-tools
-      - run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
-      - run: sh gradlew --no-daemon --max-workers=2 '-Dorg.gradle.jvmargs=-Xmx1536m -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8' -Pkotlin.compiler.execution.strategy=in-process testDebugUnitTest assembleDebug assembleRelease
-      - uses: actions/upload-artifact@v4
-        with:
-          name: unsigned-build-test-reports
-          path: app/build/reports/tests/
-          retention-days: 7
-
   release-context:
-    needs: [checks, unsigned-build]
-    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-') && github.ref_protected && needs.checks.outputs.signing_ready == 'true'
+    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-') && github.ref_protected
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      validation_run_id: ${{ steps.evidence.outputs.validation_run_id }}
+      validation_run_attempt: ${{ steps.evidence.outputs.validation_run_attempt }}
+      validation_artifact_id: ${{ steps.evidence.outputs.validation_artifact_id }}
+      validation_artifact_name: ${{ steps.evidence.outputs.validation_artifact_name }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -68,6 +34,11 @@ jobs:
           python-version: '3.13'
       - name: Verify exact release tag is on GitHub main before accessing secrets
         run: python3 -c 'import os; from scripts.build.build_prod import validate_identity; validate_identity(os.environ)'
+      - name: Require successful exact-commit MAIN validation and retained artifact
+        id: evidence
+        run: python3 -m scripts.ci.release_validation
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
 
   prod-apk:
     needs: release-context
@@ -75,6 +46,7 @@ jobs:
     environment: production
     permissions:
       contents: read
+      actions: read
       id-token: write
     steps:
       - uses: actions/checkout@v4
@@ -89,6 +61,20 @@ jobs:
         with:
           packages: platform-tools
       - run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Download only the validated MAIN artifact
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.release-context.outputs.validation_artifact_id }}
+          merge-multiple: true
+          run-id: ${{ needs.release-context.outputs.validation_run_id }}
+          github-token: ${{ github.token }}
+          path: validated-input/
+      - name: Verify unsigned APK and configuration before reading signing secrets
+        run: python3 -m scripts.ci.package_validated_apk --verify
+        env:
+          EXPECTED_VALIDATION_RUN_ID: ${{ needs.release-context.outputs.validation_run_id }}
+          EXPECTED_VALIDATION_RUN_ATTEMPT: ${{ needs.release-context.outputs.validation_run_attempt }}
+          EXPECTED_VALIDATION_ARTIFACT_ID: ${{ needs.release-context.outputs.validation_artifact_id }}
       - id: vault
         uses: hashicorp/vault-action@v3
         with:
@@ -103,6 +89,9 @@ jobs:
       - run: python3 -m scripts.build.build_prod
         env:
           SIGNING_INPUT_JSON: ${{ toJSON(steps.vault.outputs) }}
+          EXPECTED_VALIDATION_RUN_ID: ${{ needs.release-context.outputs.validation_run_id }}
+          EXPECTED_VALIDATION_RUN_ATTEMPT: ${{ needs.release-context.outputs.validation_run_attempt }}
+          EXPECTED_VALIDATION_ARTIFACT_ID: ${{ needs.release-context.outputs.validation_artifact_id }}
       - uses: actions/upload-artifact@v4
         with:
           name: wallettracker-production-${{ github.sha }}

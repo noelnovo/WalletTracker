@@ -9,6 +9,7 @@ import urllib.parse
 import urllib.request
 from scripts.build.build_dev import NoRedirect
 from scripts.build.build_prod import ROOT, validate_identity, verify_backend
+from scripts.shared.validated_apk import positive_id
 
 REPOSITORY = 'noelnovo/WalletTracker'
 API = 'https://api.github.com/repos/' + REPOSITORY
@@ -66,6 +67,10 @@ def validate_artifact(receipt, tag, sha, directory):
         raise RuntimeError('APK receipt does not match the protected GitHub release source')
     if receipt.get('package') != 'win.downops.wallettracker' or receipt.get('signer_matches_previous_release') is not True:
         raise RuntimeError('Production APK signing identity is not verified')
+    for key in ('validation_run_id', 'validation_run_attempt', 'validation_artifact_id'):
+        positive_id(receipt.get(key))
+    if not re.fullmatch(r'[a-f0-9]{64}', receipt.get('unsigned_apk_sha256', '')):
+        raise RuntimeError('Verified MAIN unsigned APK provenance is required')
     if (receipt.get('api_version') != 2 or receipt.get('registration_ui_available') is not True
             or receipt.get('registration_authority') != 'backend' or 'registration_enabled' in receipt):
         raise RuntimeError('Production APK configuration mismatch')

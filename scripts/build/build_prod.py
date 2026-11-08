@@ -12,6 +12,7 @@ import urllib.request
 import urllib.error
 from scripts.build.build_dev import report_failure
 from scripts.shared.github_identity import require_production, build_environment, PRODUCTION_SIGNER, signing_values
+from scripts.shared.validated_apk import validate_files, positive_id, version_code
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 PROD_RECORD = 'downops/data/apps/wallettracker/prod/mobile'
@@ -87,11 +88,15 @@ def signer(apksigner, apk, env):
         raise RuntimeError('APK signing identity differs from the published production app; update would be unsafe')
 
 
-def validate_built_configuration(sdk, apk, env):
+def validate_built_configuration(sdk, apk, env, *, config_path=None):
     badging = command([str(sdk / 'aapt2'), 'dump', 'badging', str(apk)], env)
-    if "package: name='win.downops.wallettracker'" not in badging or 'application-debuggable' in badging:
+    package_line = next((line for line in badging.splitlines() if line.startswith('package: ')), '')
+    package = dict(re.findall(r"(\w+)='([^']*)'", package_line))
+    if package.get('name') != 'win.downops.wallettracker' or 'application-debuggable' in badging:
         raise RuntimeError('Production APK package/debug state is unsafe')
-    configs = list((ROOT / 'app/build/generated/source/buildConfig/release').glob('**/BuildConfig.java'))
+    if package.get('versionName') != version() or package.get('versionCode') != str(version_code(version())):
+        raise RuntimeError('Production APK version differs from the exact release source')
+    configs = [config_path] if config_path is not None else list((ROOT / 'app/build/generated/source/buildConfig/release').glob('**/BuildConfig.java'))
     if len(configs) != 1:
         raise RuntimeError('Production build configuration could not be verified')
     text = configs[0].read_text()
@@ -104,7 +109,12 @@ def validate_built_configuration(sdk, apk, env):
 def main(*, validation=False):
     env = os.environ.copy()
     tag = validate_check_identity(env) if validation else validate_identity(env)
-    # Build/sign before the write-freeze to minimize downtime; publication gates API-v2.
+    validated = None
+    if not validation:
+        positive_id(env.get('EXPECTED_VALIDATION_ARTIFACT_ID'))
+        validated = validate_files(ROOT / 'validated-input', sha=env['GITHUB_SHA'], version=version(),
+                                   run_id=env.get('EXPECTED_VALIDATION_RUN_ID'), attempt=env.get('EXPECTED_VALIDATION_RUN_ATTEMPT'))
+    # Live readiness and APK/source checks remain independent of artifact reuse.
     verify_backend(require_v2=False)
     values = signing_values(env, 'PROD')
     if not all(values.get(key) for key in ('KEYSTORE_BASE64', 'KEYSTORE_PASSWORD', 'KEY_ALIAS')):
@@ -127,13 +137,19 @@ def main(*, validation=False):
             raise RuntimeError('Previous production release checksum mismatch')
         sdk = pathlib.Path(env['ANDROID_HOME']) / 'build-tools/36.0.0'
         signer(sdk / 'apksigner', previous, env)
-        # Gradle must not inherit production signing credentials; signing is a separate step.
-        build_env = build_environment(env)
-        subprocess.run(['sh', 'gradlew', '--no-daemon', '--max-workers=2',
-                        '-Dorg.gradle.jvmargs=-Xmx1536m -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8',
-                        '-Pkotlin.compiler.execution.strategy=in-process', 'testDebugUnitTest', 'assembleRelease'],
-                       cwd=ROOT, env=build_env, check=True)
-        unsigned = ROOT / 'app/build/outputs/apk/release/app-release-unsigned.apk'
+        if validation:
+            # Historical nonpublishing exercises may build; ordinary releases may not.
+            build_env = build_environment(env)
+            subprocess.run(['sh', 'gradlew', '--no-daemon', '--max-workers=2',
+                            '-Dorg.gradle.jvmargs=-Xmx1536m -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8',
+                            '-Pkotlin.compiler.execution.strategy=in-process', 'testDebugUnitTest', 'assembleRelease'],
+                           cwd=ROOT, env=build_env, check=True)
+            unsigned = ROOT / 'app/build/outputs/apk/release/app-release-unsigned.apk'
+            config_path = None
+        else:
+            unsigned = ROOT / 'validated-input/app-release-unsigned.apk'
+            config_path = ROOT / 'validated-input/BuildConfig.java'
+        validate_built_configuration(sdk, unsigned, env, config_path=config_path)
         aligned = directory / 'aligned.apk'
         target = directory / 'production-check.apk' if validation else output / ('WalletTracker-' + tag + '.apk')
         command([str(sdk / 'zipalign'), '-p', '-f', '4', str(unsigned), str(aligned)], env)
@@ -141,18 +157,23 @@ def main(*, validation=False):
                  '--ks-pass', 'env:PROD_KEYSTORE_PASSWORD', '--key-pass', 'env:PROD_KEY_PASSWORD',
                  '--out', str(target), str(aligned)], env)
         signer(sdk / 'apksigner', target, env)
-        validate_built_configuration(sdk, target, env)
+        validate_built_configuration(sdk, target, env, config_path=config_path)
         checksum = hashlib.sha256(target.read_bytes()).hexdigest()
         if not validation:
             (output / (target.name + '.sha256')).write_text(checksum + '  ' + target.name + '\n')
         receipt_name = 'production-check-receipt.json' if validation else 'release-receipt.json'
-        (output / receipt_name).write_text(json.dumps({'tag': tag, 'source_revision': env['GITHUB_SHA'],
+        receipt = {'tag': tag, 'source_revision': env['GITHUB_SHA'],
             'signing_record_path': PROD_RECORD,
             'package': 'win.downops.wallettracker', 'signer_matches_previous_release': True,
             'api_version': 2, 'registration_ui_available': True,
             'registration_authority': 'backend', 'apk_sha256': checksum,
             'purpose': 'signing-validation' if validation else 'release',
-            'publishable': not validation, 'signed_apk_retained': not validation}, indent=2) + '\n')
+            'publishable': not validation, 'signed_apk_retained': not validation}
+        if validated is not None:
+            receipt.update(validation_run_id=validated['run_id'], validation_run_attempt=validated['run_attempt'],
+                           validation_artifact_id=positive_id(env['EXPECTED_VALIDATION_ARTIFACT_ID']),
+                           unsigned_apk_sha256=validated['unsigned_apk_sha256'])
+        (output / receipt_name).write_text(json.dumps(receipt, indent=2) + '\n')
         print('Production signing validation passed; test APK is not retained or publishable' if validation
               else 'Production APK built, signed and verified; publication is a separate approved step', flush=True)
     finally:

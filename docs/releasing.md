@@ -2,7 +2,9 @@
 
 GitHub is the authoritative Android source, CI runner and APK download host.
 GitLab is a passive source/tag backup with CI disabled. The active workflow is
-[`android.yml`](../.github/workflows/android.yml).
+[`validation.yml`](../.github/workflows/validation.yml) validates branches/PRs;
+[`android.yml`](../.github/workflows/android.yml) releases version tags. The
+release filename stays unchanged to preserve the existing Vault workflow trust.
 
 **One production approval:** approve before signing; publication of the verified
 artifact then runs automatically in a separate least-privilege job.
@@ -36,11 +38,14 @@ decision, **not** sharing a keystore, password or Vault token.
 4. Check that the client remains compatible with the deployed production API.
    This app currently targets API v2. Backend changes must be released and
    verified separately before publishing a client that requires them.
-5. Pass DEV CI. The workflow runs delivery tests, JVM tests, debug compilation
+5. Pass DEV CI. The validation workflow runs automation tests, JVM tests, debug compilation
    and unsigned optimized release compilation on Java 21/Android SDK 36.
    No emulator or production signing credentials are needed for these stages.
 
-DEV, PR and ordinary MAIN branch runs validate only. They do not create releases,
+DEV, PR and ordinary MAIN branch runs validate only. Successful MAIN validation
+also retains its tested unsigned APK, actual BuildConfig, and checksum/source
+receipt for 90 days, uniquely named by commit, run ID, and run attempt.
+Branch runs do not create releases,
 production-signed APKs or automatic release drafts. Historical signing-test/check-
 tag receipts are not authorization to publish a real release.
 
@@ -48,7 +53,8 @@ tag receipts are not authorization to publish a real release.
 
 Open a release PR from DEV to MAIN, review its changes and CI results, and merge
 it without discarding production-only changes. Preserve the long-lived DEV branch.
-Merging/pushing MAIN does not itself publish an APK.
+Merging/pushing MAIN does not itself publish an APK. Its exact commit must finish
+validation successfully; DEV/PR HEAD or a nearby commit cannot replace this proof.
 
 The release maintainer must confirm that MAIN contains the reviewed application
 and that its version matches the intended tag. Repository source/tag backups in
@@ -81,19 +87,30 @@ is not a substitute for a protected MAIN version tag.
 
 On the tag's GitHub Actions run:
 
-1. `checks` and `unsigned-build` run without production secrets.
-2. `release-context` verifies the protected exact-version MAIN source.
+1. MAIN's `WalletTracker validation` run executes `checks` and `unsigned-build`
+   without production secrets. All source/automation/JVM checks and debug/release
+   builds remain enabled; required job names are unchanged.
+2. The tag's `release-context` verifies the protected exact-version MAIN source
+   and waits for that exact commit's successful MAIN validation. It checks both
+   required jobs, repository/workflow identity, the latest run attempt, and the
+   immutable unexpired artifact. It does not start another build.
 3. `prod-apk` waits for the `production` review. The named reviewer selects
    **Review deployments → production → Approve and deploy**.
-4. Signing then runs using the existing production keystore from Vault.
+4. After approval, the verified artifact is downloaded by its immutable ID and
+   source run ID. APK/configuration checksums, version, source and attempt are
+   checked before Vault access. Signing uses those validated bytes and the
+   existing production keystore; it does not rebuild them. The signer repeats
+   input/configuration checks and verifies the final production certificate.
 5. `publish-prod` runs automatically after successful signing. It does **not**
    declare another production environment review.
 
 The signing job has `contents: read` and `id-token: write`; it authenticates via
 GitHub OIDC to the existing restricted `github-actions` Vault role and reads only
 the approved production signing record. Masked `SIGNING_INPUT_JSON` supplies the
-builder. Gradle does not inherit signing JSON/passwords or Vault/OIDC/Actions/
-publication tokens. Do not toggle readiness flags to conceal an authentication
+signer. The evidence/download stages have read-only `actions: read`; validation
+has no Vault/OIDC/signing access. Ordinary release signing invokes no Gradle
+build. Historical nonpublishing signing exercises still sanitize their Gradle
+environment. Do not toggle readiness flags to conceal an authentication
 or signature failure.
 
 The separate publisher has `contents: write`, no Vault/OIDC access, and uses the
@@ -112,6 +129,8 @@ The signing/publishing scripts enforce:
   API URL/version and empty legacy embedded signing secret.
 - The original production signing certificate, not a replacement/dev signer.
 - A publishable release receipt bound to the exact tag and source revision.
+- MAIN validation run/attempt/artifact IDs and the original unsigned APK checksum
+  carried into the signed release receipt.
 - APK/checksum equality, protected tag resolution and live production API v2.
 - Verified uploaded-asset digests before publishing the automatically created
   draft. An existing published asset is never silently overwritten.
@@ -145,6 +164,8 @@ was performed; test installation/login/sync separately when required.
 | Symptom | Action |
 | --- | --- |
 | Only checks/unsigned compilation run | Branch runs do not release; verify the protected version tag, MAIN membership and signing-readiness gate |
+| Tag waits for MAIN evidence | Let the exact MAIN commit's validation finish; no duplicate tag build is started |
+| MAIN evidence failed/skipped or artifact absent/expired | Stop; rerun the original MAIN validation run for that exact commit and then rerun the release. Never substitute another commit, PR artifact, or handwritten receipt |
 | `prod-apk` is waiting | The configured production reviewer must approve in GitHub; do not share credentials or bypass the environment |
 | Review API returns 403 | The caller/token may lack `deployments:write`; use the review UI rather than broadening an automation credential |
 | Vault authentication/claims fail | Stop and have an authorized administrator compare the existing role/trust with actual job claims; no root recovery, self-grant or signing-key rotation |

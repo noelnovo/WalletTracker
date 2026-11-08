@@ -8,16 +8,28 @@ package imports rather than depending on the old flat `delivery/` search path.
 | Compatibility checks | `python3 -m scripts.ci.verify_contract` | Source checks; optional API probe |
 | Automation tests | `python3 -m unittest discover -s tests/automation -p 'test_*.py'` | Synthetic fixtures; no live signing or publication |
 | App tests/build | `sh gradlew testDebugUnitTest assembleDebug assembleRelease` | Gradle; unsigned production output |
+| Retain validated input | `python3 -m scripts.ci.package_validated_apk` | Trusted MAIN push, completed checks/build only |
+| Release evidence | `python3 -m scripts.ci.release_validation` | Read-only exact-source MAIN run/jobs/artifact proof; waits instead of rebuilding |
+| Verify downloaded input | `python3 -m scripts.ci.package_validated_apk --verify` | Source/attempt/checksum/version/configuration checks before Vault access |
 | Stable dev build | `python3 -m scripts.build.build_dev` | Restricted DEV signing identity only |
-| Production signing | `python3 -m scripts.build.build_prod` | Protected exact-version MAIN tag and production approval |
+| Production signing | `python3 -m scripts.build.build_prod` | Protected MAIN tag and approval; signs the validated APK without rebuilding |
 | Publication | `python3 -m scripts.release.publish_prod` | Verified same-run artifact; no Vault access |
 | Signing exercise | `python3 -m scripts.release.check_prod` | Protected check tag; no retained/publishable APK |
 | Publication exercise | `python3 -m scripts.release.check_publication` | Owned disposable draft; existing check-tag restrictions |
 
 Signing/publication commands are CI entry points, not ordinary local development
 commands. Their source, identity, certificate, and approval checks remain intact.
+[`validation.yml`](../.github/workflows/validation.yml) validates DEV/MAIN/PRs;
+[`android.yml`](../.github/workflows/android.yml) is tag-only production release.
+MAIN validation input is retained for 90 days and named by exact source/run/attempt;
+tag jobs download only the verified immutable artifact ID. Neither successful
+PR/DEV builds nor stale/missing MAIN evidence authorize release. There is no
+automatic rebuild/fallback that silently masks failed validation.
 Generated artifacts go under ignored `artifacts/`; signing exercises use
 `artifacts/signing-check/`. Gradle output remains under `app/build/`.
+Downloaded unsigned inputs live in ignored `validated-input/`, separate from the
+signed artifacts published by the production job. Historical check helpers are
+retained but are not scheduled by these workflows.
 
 `config/ci/` contains compatibility/readiness configuration; `config/signing/`
 contains non-secret policy plans and role declarations. Historical receipts live

@@ -53,3 +53,4 @@ google-services.json
 __pycache__/
 .prod-signing-*/
 artifacts/
+validated-input/

@@ -28,13 +28,17 @@ class ProductionPublicationTests(unittest.TestCase):
             receipt = {'tag': 'v3.0.0', 'source_revision': 'a' * 40, 'package': 'win.downops.wallettracker',
                        'signer_matches_previous_release': True, 'api_version': 2,
                        'registration_ui_available': True, 'registration_authority': 'backend',
-                       'apk_sha256': hashlib.sha256(payload).hexdigest(), 'purpose': 'release', 'publishable': True}
+                       'apk_sha256': hashlib.sha256(payload).hexdigest(), 'purpose': 'release', 'publishable': True,
+                       'validation_run_id': 123, 'validation_run_attempt': 1, 'validation_artifact_id': 456,
+                       'unsigned_apk_sha256': 'c' * 64}
             self.assertTrue(publish_prod.validate_artifact(receipt, 'v3.0.0', 'a' * 40, directory).is_file())
             for change in ({'source_revision': 'b' * 40}, {'signer_matches_previous_release': False},
                            {'registration_ui_available': False}, {'registration_authority': 'apk'},
                            {'registration_enabled': False}, {'registration_enabled': True},
                            {'package': 'win.downops.wallettracker.debug'}, {'apk_sha256': '0' * 64},
-                           {'purpose': 'signing-validation'}, {'publishable': False}):
+                           {'purpose': 'signing-validation'}, {'publishable': False},
+                           {'validation_run_id': None}, {'validation_run_attempt': 0}, {'validation_artifact_id': True},
+                           {'unsigned_apk_sha256': ''}):
                 with self.subTest(change=change), self.assertRaises(RuntimeError):
                     publish_prod.validate_artifact(dict(receipt, **change), 'v3.0.0', 'a' * 40, directory)
             (directory / 'WalletTracker-v3.0.0.apk.sha256').write_text('tampered-sidecar')
@@ -78,7 +82,9 @@ class ProductionPublicationTests(unittest.TestCase):
                            'package': 'win.downops.wallettracker', 'signer_matches_previous_release': True,
                            'api_version': 2, 'registration_ui_available': True,
                            'registration_authority': 'backend', 'apk_sha256': digest,
-                           'purpose': 'release', 'publishable': True}
+                           'purpose': 'release', 'publishable': True,
+                           'validation_run_id': 123, 'validation_run_attempt': 1, 'validation_artifact_id': 456,
+                           'unsigned_apk_sha256': 'c' * 64}
                 (artifacts / 'release-receipt.json').write_text(json.dumps(receipt))
                 uploads, publications = [], []
                 def github(path, token, data=None, method=None, binary=None, content_type=None):
