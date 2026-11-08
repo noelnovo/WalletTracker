@@ -1,7 +1,7 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <style name="Theme.WalletTracker.Modern" parent="Theme.Material3.DayNight.NoActionBar">
-        <item name="colorPrimary">#81D5BA</item>
-        <item name="colorSecondary">#B2CCC0</item>
+    <style name="Theme.WalletTracker.Modern" parent="Theme.WalletTracker.PaletteBase">
+        <item name="colorPrimary">@color/wallet_primary</item>
+        <item name="colorSecondary">@color/wallet_secondary</item>
         <item name="android:fontFamily">sans</item>
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowSoftInputMode">adjustResize</item>

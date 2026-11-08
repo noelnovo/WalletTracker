@@ -105,6 +105,10 @@ class WalletModel(application: Application) : AndroidViewModel(application) {
 
     fun changed() { changes.value++; viewModelScope.launch { sync() } }
     fun syncSoon(delayMillis: Long = 0) { viewModelScope.launch { delay(delayMillis); sync() } }
+    fun retrySync() { viewModelScope.launch {
+        mutex.withLock { if (unlocked) store?.retryItemizedBills() }
+        sync()
+    } }
 
     suspend fun sync() = mutex.withLock {
         val local = store ?: return@withLock
@@ -132,11 +136,13 @@ class WalletModel(application: Application) : AndroidViewModel(application) {
             }
             if (!unlocked) return@withLock
             val conflicts = local.rows(true).count { it.optBoolean("has_conflict") }
-            status.value = if (conflicts > 0) "Review ($conflicts)" else if (local.pendingCount() > 0) "Pending" else "Synced"
+            status.value = if (local.blockedItemizedBills() > 0) "Itemized bills need a server update; saved on this phone"
+                else if (conflicts > 0) "Review ($conflicts)" else if (local.pendingCount() > 0) "Pending" else "Synced"
             changes.value++
         } catch (error: IOException) {
             if (!unlocked) return@withLock
-            status.value = if (error is ApiFailure) {
+            if (error is ItemizedBillSyncUnavailable) withContext(Dispatchers.IO) { local.retainIncompatibleBill(error) }
+            status.value = if (error is ItemizedBillSyncUnavailable) error.message.orEmpty() else if (error is ApiFailure) {
                 if (error.status == 401) "Sign in again" else error.message ?: "Sync failed"
             } else "Offline"
             changes.value++

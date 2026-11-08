@@ -20,6 +20,19 @@ class ProductionSigningTests(unittest.TestCase):
     def environment(self, **changes):
         return github_environment(**changes)
 
+    def setUp(self):
+        # These job/tag fixtures model 3.0.0, independently of the next app version.
+        # Keep ancestry and permission tests reaching their intended guard after a bump.
+        version = patch.object(build_prod, 'version', return_value='3.0.0')
+        version.start()
+        self.addCleanup(version.stop)
+
+    def test_tag_for_a_different_declared_version_is_rejected_before_git(self):
+        with patch.object(build_prod, 'version', return_value='3.1.0'), patch.object(build_prod, 'command') as command:
+            with self.assertRaises(RuntimeError):
+                build_prod.validate_identity(self.environment())
+            command.assert_not_called()
+
     def test_unprotected_or_nonproduction_identity_cannot_sign(self):
         for changes in ({'GITHUB_REPOSITORY_ID': '1'}, {'GITHUB_REF_NAME': 'v2.2.2'}, {'GITHUB_REF_PROTECTED': 'false'},
                         {'GITHUB_REPOSITORY_OWNER_ID': '1'}, {'GITHUB_EVENT_NAME': 'pull_request'}):
@@ -164,7 +177,12 @@ class ProductionSigningTests(unittest.TestCase):
 
     def test_registration_action_is_not_gated_by_the_build_variant(self):
         activity = (build_prod.ROOT / 'app/src/main/java/win/downops/wallettracker/v2/WalletActivity.kt').read_text()
-        self.assertIn('body.addView(button("Create account", false)', activity)
+        # Registration now has a separate form instead of sharing sign-in fields.
+        # Its entry point and submit action must remain available in release builds.
+        self.assertIn('else "Create an account")', activity)
+        self.assertIn('login(createAccount = !createAccount, usePassword = true)', activity)
+        self.assertIn('button(if (createAccount) "Create account" else "Sign in")', activity)
+        self.assertIn('if (createAccount) model.register(', activity)
         self.assertNotIn('BuildConfig.ALLOW_REGISTER', activity)
         self.assertNotIn('if (BuildConfig.REGISTRATION_UI_AVAILABLE)', activity)
 
