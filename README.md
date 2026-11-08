@@ -50,14 +50,23 @@ data or substitute a different signing identity.
 
 ## CI and releases
 
-[GitHub Actions](.github/workflows/android.yml) is the active pipeline. GitLab is
-a passive source/tag backup with CI disabled. DEV, MAIN, and pull requests run
-checks and unsigned builds; a branch push does not publish an APK.
+[WalletTracker validation](.github/workflows/validation.yml) runs on DEV, MAIN,
+and pull requests: source checks, automation tests, JVM tests, and debug/unsigned
+release builds. GitLab remains a passive backup with CI disabled.
+
+[WalletTracker production release](.github/workflows/android.yml) runs only on
+version tags. It waits for successful MAIN validation of the **exact tag commit**
+and reuses that run's immutable, checksum-bound unsigned APK. It does not repeat
+the build. PR/DEV results cannot substitute for MAIN evidence, and missing,
+failed, skipped, expired, or mismatched evidence blocks signing.
 
 A release requires a matching version and release notes, a reviewed merge into
 MAIN, and an exact protected `vX.Y.Z` tag. The production reviewer approves once
-before Vault-backed signing; the separate least-privilege publication job then
-verifies and publishes the APK with its ephemeral `GITHUB_TOKEN`.
+before Vault-backed signing. Input checksums, source, version, and configuration
+are verified before Vault access and again by the signer; the separate
+least-privilege publication job verifies and publishes the signed APK with its
+ephemeral `GITHUB_TOKEN`. MAIN validates; the tag signs/publishes those validated
+bytes. Two differently named runs remain, but duplicate validation is removed.
 
 Android releases do not deploy the backend or run database migrations. Confirm
 backend compatibility separately before releasing a client that needs new API

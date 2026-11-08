@@ -6,16 +6,17 @@ REPOSITORY = 'noelnovo/WalletTracker'
 REPOSITORY_ID = '909094292'
 OWNER_ID = '128699907'
 WORKFLOW = '.github/workflows/android.yml'
+VALIDATION_WORKFLOW = '.github/workflows/validation.yml'
 PRODUCTION_SIGNER = '60b988457cca109d8f3a1f3ad288f95648f9938990aeedff0dfc5ed479952b61'
 
 
-def require_repository(env):
+def require_repository(env, *, workflow=WORKFLOW):
     expected = {'GITHUB_ACTIONS': 'true', 'GITHUB_REPOSITORY': REPOSITORY,
                 'GITHUB_REPOSITORY_ID': REPOSITORY_ID, 'GITHUB_REPOSITORY_OWNER_ID': OWNER_ID}
     if any(env.get(name) != value for name, value in expected.items()):
         raise RuntimeError('Signing requires the approved GitHub repository identity')
     ref = env.get('GITHUB_REF', '')
-    if env.get('GITHUB_WORKFLOW_REF') != REPOSITORY + '/' + WORKFLOW + '@' + ref:
+    if env.get('GITHUB_WORKFLOW_REF') != REPOSITORY + '/' + workflow + '@' + ref:
         raise RuntimeError('The reviewed GitHub workflow identity is required')
     if env.get('GITHUB_EVENT_NAME') not in ('push', 'workflow_dispatch'):
         raise RuntimeError('Untrusted pull-request events cannot use signing credentials')
@@ -27,6 +28,13 @@ def require_dev(env):
     require_repository(env)
     if env.get('GITHUB_REF') != 'refs/heads/dev' or env.get('GITHUB_REF_TYPE') != 'branch':
         raise RuntimeError('Development signing is restricted to the approved dev branch')
+
+
+def require_main_validation(env):
+    require_repository(env, workflow=VALIDATION_WORKFLOW)
+    if (env.get('GITHUB_EVENT_NAME') != 'push' or env.get('GITHUB_REF') != 'refs/heads/main'
+            or env.get('GITHUB_REF_TYPE') != 'branch'):
+        raise RuntimeError('Reusable validation artifacts require the trusted MAIN push workflow')
 
 
 def require_production(env):

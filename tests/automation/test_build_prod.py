@@ -164,7 +164,7 @@ class ProductionSigningTests(unittest.TestCase):
             root = pathlib.Path(directory)
             config = root / 'app/build/generated/source/buildConfig/release/win/downops/wallettracker/BuildConfig.java'
             config.parent.mkdir(parents=True)
-            with patch.object(build_prod, 'ROOT', root), patch.object(build_prod, 'command', return_value="package: name='win.downops.wallettracker'"):
+            with patch.object(build_prod, 'ROOT', root), patch.object(build_prod, 'command', return_value="package: name='win.downops.wallettracker' versionCode='30000' versionName='3.0.0'"):
                 config.write_text(valid)
                 build_prod.validate_built_configuration(root / 'sdk', root / 'unsigned.apk', {})
                 for text in (valid.replace('REGISTRATION_UI_AVAILABLE = true', 'REGISTRATION_UI_AVAILABLE = false'),
