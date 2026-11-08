@@ -1,6 +1,10 @@
 package win.downops.wallettracker.v2
 
 import android.view.ViewGroup
+import android.view.View
+import androidx.recyclerview.widget.RecyclerView
+import androidx.recyclerview.widget.LinearLayoutManager
+import com.google.android.material.bottomnavigation.BottomNavigationView
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.content.res.Configuration
@@ -49,6 +53,21 @@ class WalletUiTest {
             scenario.onActivity { open = ViewModelProvider(it)[WalletModel::class.java].unlocked }
             open
         }
+        waitForWalletData(scenario)
+    }
+
+    private fun descendants(view: View): Sequence<View> = sequence {
+        yield(view)
+        if (view is ViewGroup) for (index in 0 until view.childCount) yieldAll(descendants(view.getChildAt(index)))
+    }
+
+    private fun waitForWalletData(scenario: ActivityScenario<WalletActivity>) = waitUntil {
+        var ready = false
+        scenario.onActivity { activity ->
+            val revision = ViewModelProvider(activity)[WalletModel::class.java].changes.value
+            ready = descendants(activity.window.decorView).any { it.tag == "wallet-page-revision:$revision" }
+        }
+        ready
     }
 
     private fun waitUntil(condition: () -> Boolean) {
@@ -81,7 +100,7 @@ class WalletUiTest {
                 model.store!!.save("category", JSONObject().put("name", "Test ${UUID.randomUUID()}"))
                 model.changed()
             }
-            InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+            waitForWalletData(scenario)
             action("Add expense").perform(click())
             onView(withHint("Description")).perform(scrollTo(), replaceText("Synthetic lunch"))
             onView(withHint("Amount")).perform(scrollTo(), click(), typeText("15.00"))
@@ -181,6 +200,88 @@ class WalletUiTest {
         }
     }
 
+    @Test fun navigationAndCachedPagesSurviveTabSwitchesAndStatusUpdates() {
+        ActivityScenario.launch(WalletActivity::class.java).use { scenario ->
+            localWallet(scenario)
+            lateinit var navigation: BottomNavigationView
+            lateinit var expensePage: View
+            scenario.onActivity { activity ->
+                val views = descendants(activity.window.decorView).toList()
+                navigation = views.filterIsInstance<BottomNavigationView>().single()
+                expensePage = views.single { it.tag?.toString()?.startsWith("wallet-page-revision:") == true }
+                ViewModelProvider(activity)[WalletModel::class.java].status.value = "Syncing…"
+            }
+            InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+            repeat(10) {
+                onView(withContentDescription("Bills")).perform(click())
+                action("Split bill").check(matches(isDisplayed()))
+                onView(withContentDescription("Expenses")).perform(click())
+                scenario.onActivity { activity ->
+                    val views = descendants(activity.window.decorView).toList()
+                    assertSame(navigation, views.filterIsInstance<BottomNavigationView>().single())
+                    assertTrue("Expense page must be reused", views.any { it === expensePage })
+                    assertEquals(1, navigation.selectedItemId)
+                }
+            }
+            scenario.onActivity { ViewModelProvider(it)[WalletModel::class.java].changed() }
+            waitForWalletData(scenario)
+            scenario.onActivity { activity ->
+                assertTrue("Unchanged data must not rebuild the page", descendants(activity.window.decorView).any { it === expensePage })
+            }
+        }
+    }
+
+    @Test fun returningToATabPreservesScrollAndDataChangesRefreshItsContent() {
+        ActivityScenario.launch(WalletActivity::class.java).use { scenario ->
+            val billName = "Fresh cached bill ${UUID.randomUUID()}"
+            localWallet(scenario)
+            scenario.onActivity { activity ->
+                val model = ViewModelProvider(activity)[WalletModel::class.java]
+                repeat(40) { index -> model.store!!.save("expense", JSONObject()
+                    .put("description", "Scroll proof $index").put("amount_minor", 100)
+                    .put("currency", "EUR").put("date", "2026-11-08").put("category_id", JSONObject.NULL)) }
+                model.changed()
+            }
+            waitForWalletData(scenario)
+            var position = 0
+            scenario.onActivity { activity ->
+                val list = descendants(activity.window.decorView).filterIsInstance<RecyclerView>().single()
+                list.scrollToPosition(20)
+            }
+            InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+            scenario.onActivity { activity ->
+                val list = descendants(activity.window.decorView).filterIsInstance<RecyclerView>().single()
+                position = (list.layoutManager as LinearLayoutManager).findFirstVisibleItemPosition()
+                assertTrue(position > 0)
+            }
+            onView(withContentDescription("Bills")).perform(click())
+            onView(withContentDescription("Expenses")).perform(click())
+            scenario.onActivity { activity ->
+                val list = descendants(activity.window.decorView).filterIsInstance<RecyclerView>().single()
+                assertEquals(position, (list.layoutManager as LinearLayoutManager).findFirstVisibleItemPosition())
+            }
+            scenario.recreate()
+            waitForWalletData(scenario)
+            scenario.onActivity { activity ->
+                val list = descendants(activity.window.decorView).filterIsInstance<RecyclerView>().single()
+                assertEquals("Rotation/recreation must preserve the list position", position,
+                    (list.layoutManager as LinearLayoutManager).findFirstVisibleItemPosition())
+            }
+            scenario.onActivity { activity ->
+                val model = ViewModelProvider(activity)[WalletModel::class.java]
+                model.store!!.save("bill", JSONObject().put("description", billName)
+                    .put("amount_minor", 100).put("currency", "EUR").put("date", "2099-01-01")
+                    .put("participants", org.json.JSONArray().put("Person 1"))
+                    .put("shares", org.json.JSONArray().put(JSONObject().put("name", "Person 1").put("amount_minor", 100)))
+                    .put("paid_by", "Person 1"))
+                model.changed()
+            }
+            waitForWalletData(scenario)
+            onView(withContentDescription("Bills")).perform(click())
+            onView(withText(billName)).check(matches(isDisplayed()))
+        }
+    }
+
     @Test fun lightAndDarkDesignTokensMeetTextContrastTargets() {
         val base = InstrumentationRegistry.getInstrumentation().targetContext
         for (mode in listOf(Configuration.UI_MODE_NIGHT_NO, Configuration.UI_MODE_NIGHT_YES)) {
@@ -225,7 +326,7 @@ class WalletUiTest {
                 }
                 model.changed()
             }
-            InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+            waitForWalletData(scenario)
             action("Add expense").check { view, error -> if (error != null) throw error; syntheticPreview(view, "expenses") }
             onView(withContentDescription("Settings")).perform(click())
             onView(withText("Privacy")).check { view, error -> if (error != null) throw error; syntheticPreview(view, "settings") }

@@ -27,10 +27,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - run: python3 delivery/verify_contract.py
-      - run: python3 -m unittest discover -s delivery -p 'test_*.py'
+      - run: python3 -m scripts.ci.verify_contract
+      - run: python3 -m unittest discover -s tests/automation -p 'test_*.py'
       - id: gates
-        run: python3 -c 'import json,os; value=json.load(open("delivery/github-actions-status.json"))["vault_signing_ready"]; assert type(value) is bool; open(os.environ["GITHUB_OUTPUT"],"a").write("signing_ready=" + str(value).lower() + "\n")'
+        run: python3 -c 'import json,os; value=json.load(open("config/ci/github-actions-status.json"))["vault_signing_ready"]; assert type(value) is bool; open(os.environ["GITHUB_OUTPUT"],"a").write("signing_ready=" + str(value).lower() + "\n")'
 
   unsigned-build:
     needs: checks
@@ -67,7 +67,7 @@ jobs:
         with:
           python-version: '3.13'
       - name: Verify exact release tag is on GitHub main before accessing secrets
-        run: PYTHONPATH=delivery python3 -c 'import os; from build_prod import validate_identity; validate_identity(os.environ)'
+        run: python3 -c 'import os; from scripts.build.build_prod import validate_identity; validate_identity(os.environ)'
 
   prod-apk:
     needs: release-context
@@ -100,13 +100,13 @@ jobs:
           exportToken: false
           exportEnv: false
           secrets: downops/data/apps/wallettracker/prod/mobile * | PROD_
-      - run: python3 delivery/build_prod.py
+      - run: python3 -m scripts.build.build_prod
         env:
           SIGNING_INPUT_JSON: ${{ toJSON(steps.vault.outputs) }}
       - uses: actions/upload-artifact@v4
         with:
           name: wallettracker-production-${{ github.sha }}
-          path: delivery/artifacts/
+          path: artifacts/
           if-no-files-found: error
           retention-days: 30
 
@@ -125,10 +125,10 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: wallettracker-production-${{ github.sha }}
-          path: delivery/artifacts/
+          path: artifacts/
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - run: python3 delivery/publish_prod.py
+      - run: python3 -m scripts.release.publish_prod
         env:
           GH_TOKEN: ${{ github.token }}

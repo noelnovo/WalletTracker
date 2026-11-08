@@ -55,13 +55,7 @@ class WalletDesign(private val context: Context) {
         addView(body, FrameLayout.LayoutParams(-1, -2))
     }
 
-    fun featuredCard(body: View) = card(body, container).apply {
-        body.background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(
-            ContextCompat.getColor(context, R.color.wallet_hero_start),
-            ContextCompat.getColor(context, R.color.wallet_hero_center),
-            ContextCompat.getColor(context, R.color.wallet_hero_end),
-        )).apply { cornerRadius = dp(24).toFloat() }
-    }
+    fun featuredCard(body: View) = card(body, container)
 
     fun icon(resource: Int, tint: Int = primary) = ImageView(context).apply {
         setImageResource(resource); imageTintList = ColorStateList.valueOf(tint)

@@ -135,9 +135,13 @@ class WalletModel(application: Application) : AndroidViewModel(application) {
                 } while (page.getBoolean("has_more") && unlocked)
             }
             if (!unlocked) return@withLock
-            val conflicts = local.rows(true).count { it.optBoolean("has_conflict") }
-            status.value = if (local.blockedItemizedBills() > 0) "Itemized bills need a server update; saved on this phone"
+            val summary = withContext(Dispatchers.IO) {
+                val conflicts = local.rows(true).count { it.optBoolean("has_conflict") }
+                if (local.blockedItemizedBills() > 0) "Itemized bills need a server update; saved on this phone"
                 else if (conflicts > 0) "Review ($conflicts)" else if (local.pendingCount() > 0) "Pending" else "Synced"
+            }
+            if (!unlocked) return@withLock
+            status.value = summary
             changes.value++
         } catch (error: IOException) {
             if (!unlocked) return@withLock

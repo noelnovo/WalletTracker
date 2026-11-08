@@ -1,92 +1,74 @@
-# Wallet Tracker
+# WalletTracker
 
-> **WalletTracker 3 uses API v2.** See the
-> [developer release guide](delivery/PRODUCTION-RELEASE.md) and
-> [architecture, security boundaries, sync behavior and Vault signing plan](delivery/DEV-REFACTOR.md).
-> The historical v1 overview below is retained for migration context; the new
-> launcher has no file import or hybrid-encrypted API protocol. GitHub Actions
-> validates DEV and publishes approved MAIN releases; GitLab is a passive backup
-> with CI disabled. The feature/protocol descriptions and screenshots below are historical.
-
-An Android expense tracking app built in Kotlin with end-to-end encryption, biometric authentication, and a fully automated CI/CD pipeline.
+A native Android wallet for expenses, categories, and shared bills, with encrypted
+on-device records, fingerprint unlock, and optional account sync over HTTPS.
 
 ## Features
 
-### Expense Management
-- Create and manage expense categories with custom names
-- Log expenses with amount, date, and category
-- Browse expenses per category
-- Import expenses from spreadsheets
+- Record expenses and organize them into categories.
+- Split bills with exact-cent shares and per-person extras.
+- Use a local-only wallet or sync an authenticated account with API v2.
+- Automatically request fingerprint unlock when reopening a remembered account;
+  cancellation leaves a retry button and password fallback.
+- Neutral light and black/charcoal dark themes with restrained fuchsia accents.
+- Stable bottom navigation with cached tab pages and background wallet loading.
 
-### Metrics & Analytics
-- View total spending, expense count, and average per expense
-- Breakdown by category with percentage bars
-- Monthly breakdown with progress indicators
-- Filter metrics by category and/or month
+Local records use Android Keystore-backed encryption. API v2 uses HTTPS and
+short-lived access tokens with rotated refresh tokens—not the retired v1 hybrid
+encryption protocol. Screens remain protected against screenshots and recording.
 
-### Offline & Online Mode
-The app supports two modes controlled at runtime:
-- **Online mode** — syncs data with the backend API, leveraging end-to-end encrypted communication
-- **Offline mode** — all data is stored locally in SQLite; no network required
+## Project layout
 
-The active mode is injected via Hilt (`AppMode`) and repository implementations swap transparently between HTTP services and SQLite services.
+| Directory | Purpose |
+| --- | --- |
+| `app/` | Android application, JVM tests, and emulator-only UI/storage tests |
+| `.github/workflows/` | GitHub Actions job orchestration and permissions |
+| `scripts/ci/` | Source/API compatibility checks |
+| `scripts/build/` | Debug/production build and signing helpers |
+| `scripts/release/` | Verified APK publication and non-publishing signing checks |
+| `scripts/shared/` | Shared source-identity and credential-boundary guards |
+| `tests/automation/` | Offline tests for build/release automation |
+| `config/` | Non-secret CI, signing-policy, and historical verification records |
+| `docs/` | Architecture, automation, and release documentation |
 
-### Biometric Login
-- Login with fingerprint or device biometrics via Android BiometricPrompt
-- Credentials are retrieved securely from the local session store after biometric verification
-- Falls back to username/password login
+Python scripts are small CI helpers; Gradle still builds and tests the Android
+application. Run Python entry points from the repository root with `python3 -m`.
 
-### End-to-End Cryptography
-All API communication is encrypted using a hybrid RSA + AES/GCM scheme:
+## Development
 
-1. **Key exchange** — on registration, the client generates a 2048-bit RSA key pair and exchanges public keys with the server
-2. **Hybrid encryption** — outgoing requests are encrypted with AES-256-GCM; the AES key is encrypted with the server's RSA public key (OAEP/SHA-256)
-3. **Request signing** — each request is signed using RSA/PSS (SHA-256) with the client's private key; the server verifies the signature
-4. **Response decryption** — responses are decrypted using the client's RSA private key to unwrap the AES key, then AES/GCM to decrypt the payload
+Requires Java 21 and Android SDK 36. No production signing credentials are needed.
 
-Keys are stored in the local SQLite session table and never leave the device unencrypted.
+```sh
+python3 -m scripts.ci.verify_contract
+python3 -m unittest discover -s tests/automation -p 'test_*.py'
+sh gradlew testDebugUnitTest assembleDebug assembleRelease
+```
 
-## CI/CD Pipeline
+UI/storage tests create synthetic records and must run only on an isolated
+emulator, never on a personal phone. Install updates in place; do not clear wallet
+data or substitute a different signing identity.
 
-The workflow is [`.github/workflows/android.yml`](.github/workflows/android.yml).
-Pushing DEV or MAIN runs checks and unsigned compilation; it does **not** publish
-a release. A real release requires an exact protected `vX.Y.Z` tag on MAIN:
+## CI and releases
 
-1. Update the version in `app/build.gradle.kts` and add matching release notes.
-2. Pass DEV CI and merge the reviewed release PR into MAIN.
-3. An authorized release maintainer creates the protected version tag on MAIN.
-4. Checks, unsigned compilation and release-context validation run automatically.
-5. The production reviewer approves **once**, before Vault-backed signing.
-6. CI signs with the existing production identity, verifies the APK and publishes
-   it automatically with its job-scoped `GITHUB_TOKEN`.
+[GitHub Actions](.github/workflows/android.yml) is the active pipeline. GitLab is
+a passive source/tag backup with CI disabled. DEV, MAIN, and pull requests run
+checks and unsigned builds; a branch push does not publish an APK.
 
-Developers do not need SSH, Kubernetes or Vault credentials. Ordinary source-code
-write access does not grant protected-tag creation or production-review rights.
-Signing keys never belong in Git; the signing job authenticates to Vault using
-restricted GitHub OIDC. The publication job has separate permissions and no
-second production review. Registration is controlled by the server, not hidden
-or hard-disabled in the APK. An Android release does not deploy the backend or
-run database migrations/backups.
+A release requires a matching version and release notes, a reviewed merge into
+MAIN, and an exact protected `vX.Y.Z` tag. The production reviewer approves once
+before Vault-backed signing; the separate least-privilege publication job then
+verifies and publishes the APK with its ephemeral `GITHUB_TOKEN`.
 
-See [the complete release procedure and troubleshooting guide](delivery/PRODUCTION-RELEASE.md).
+Android releases do not deploy the backend or run database migrations. Confirm
+backend compatibility separately before releasing a client that needs new API
+features. Never move an existing version tag or bypass production approval.
 
-## Tech Stack
+## Documentation
 
-- **Language**: Kotlin
-- **Architecture**: MVVM + Repository pattern
-- **Dependency injection**: Hilt
-- **Database**: SQLite via `DatabaseHelper` (custom helper, no ORM)
-- **Networking**: Retrofit + OkHttp
-- **Cryptography**: Java Security (`RSA/ECB/OAEPWithSHA-256AndMGF1Padding`, `AES/GCM/NoPadding`, `SHA256withRSA/PSS`)
-- **Biometrics**: AndroidX BiometricPrompt
-- **Secrets management**: HashiCorp Vault
+- [Architecture and security boundaries](docs/architecture.md)
+- [Automation layout and commands](docs/automation.md)
+- [Release procedure and troubleshooting](docs/releasing.md)
+- Release notes: [3.1.1](docs/releases/3.1.1.md), [3.1.0](docs/releases/3.1.0.md), [3.0.0](docs/releases/3.0.0.md)
 
-## Screenshots
-
-![Login](images/login.jpg)
-
-![Categories](images/categories.jpg)
-
-![Expenses](images/expenses.jpg)
-
-![Create expense](images/create%20expense.jpg)
+The old v1 screenshots have been removed. Personal wallet data is never used for
+public screenshots.
