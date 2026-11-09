@@ -1,8 +1,11 @@
 """Credential-free regression tests for security boundaries and hard failures."""
 import importlib.util
+import contextlib
+import io
 import json
 import pathlib
 import tempfile
+import subprocess
 import unittest
 from unittest.mock import patch
 
@@ -12,6 +15,36 @@ spec.loader.exec_module(gate)
 
 
 class SecurityTests(unittest.TestCase):
+    def test_scanner_keeps_token_out_of_arguments_and_output(self):
+        creds = {'SONAR_TOKEN': 'synthetic-credential', 'SONAR_HOST_URL': 'https://sonar.example.test',
+                 'SONAR_PROJECT_KEY': 'android'}
+        result = subprocess.CompletedProcess([], 0, stdout=b'Analysis report uploaded', stderr=b'')
+        output = io.StringIO()
+        with patch.object(gate.subprocess, 'run', return_value=result) as run, contextlib.redirect_stdout(output):
+            self.assertTrue(gate.sonar(creds))
+        args = run.call_args.args[0]
+        self.assertIn('--entrypoint', args)
+        self.assertEqual(args[args.index('--entrypoint') + 1], 'sonar-scanner')
+        self.assertNotIn(creds['SONAR_TOKEN'], ' '.join(args))
+        self.assertEqual(run.call_args.kwargs['env']['SONAR_TOKEN'], creds['SONAR_TOKEN'])
+        self.assertEqual(run.call_args.kwargs['timeout'], 600)
+        self.assertNotIn(creds['SONAR_TOKEN'], output.getvalue())
+        self.assertTrue(json.loads(output.getvalue())['analysis_submitted'])
+
+    def test_scanner_failure_emits_only_fixed_categories(self):
+        creds = {'SONAR_TOKEN': 'synthetic-credential', 'SONAR_HOST_URL': 'https://sonar.example.test',
+                 'SONAR_PROJECT_KEY': 'android'}
+        result = subprocess.CompletedProcess([], 125, stdout=b'',
+            stderr=b'toomanyrequests: synthetic-credential untrusted scanner details')
+        output = io.StringIO()
+        with patch.object(gate.subprocess, 'run', return_value=result), contextlib.redirect_stdout(output):
+            self.assertFalse(gate.sonar(creds))
+        diagnostic = json.loads(output.getvalue())
+        self.assertEqual(diagnostic['scanner_exit_code'], 125)
+        self.assertTrue(diagnostic['scanner_failure_categories']['registry_rate_limited'])
+        self.assertNotIn('synthetic-credential', output.getvalue())
+        self.assertNotIn('untrusted scanner details', output.getvalue())
+
     def test_https_required(self):
         for url in ['http://example.test', 'https://user:password@example.test']:
             with self.assertRaises(RuntimeError):

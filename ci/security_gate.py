@@ -175,18 +175,39 @@ def sonar(creds):
         SONAR_HOST_URL=creds['SONAR_HOST_URL'])
     result = subprocess.run(['docker', 'run', '--rm',
         '--user', str(os.getuid()) + ':' + str(os.getgid()),
+        # The image wrapper converts SONAR_TOKEN into a command-line property.
+        # The current scanner reads SONAR_TOKEN natively; keep it in env only.
+        '--entrypoint', 'sonar-scanner',
         '--env', 'SONAR_TOKEN', '--env', 'SONAR_HOST_URL',
         '--env', 'SONAR_USER_HOME=/tmp/sonar',
         '--volume', str(ROOT) + ':/usr/src', SCANNER,
         '-Dsonar.projectKey=' + creds['SONAR_PROJECT_KEY'],
         '-Dsonar.qualitygate.wait=true', '-Dsonar.qualitygate.timeout=300'],
-        env=env, capture_output=True)
+        env=env, capture_output=True, timeout=600)
     # Scanner output may contain sensitive diagnostics. Emit fixed categories only.
     text = (result.stdout + result.stderr).decode(errors='replace').lower()
+    categories = {name: any(needle in text for needle in needles)
+        for name, needles in {
+            'registry_rate_limited': ['toomanyrequests', 'you have reached your unauthenticated pull rate limit'],
+            'image_pull_denied': ['pull access denied'],
+            'image_unavailable': ['manifest unknown', 'no matching manifest'],
+            'docker_unavailable': ['cannot connect to the docker daemon'],
+            'network_failure': ['connection refused', 'failed to connect', 'unknownhostexception', 'connection timed out'],
+            'tls_failure': ['sslhandshakeexception', 'pkix path building failed'],
+            'http_401': ['http 401', 'status code: 401', 'status 401'],
+            'http_403': ['http 403', 'status code: 403', 'status 403'],
+            'filesystem_permission': ['accessdeniedexception', 'permission denied', 'unable to create'],
+            'missing_binaries': ['please provide compiled classes', 'no files nor directories matching'],
+            'duplicate_index': ['indexed twice'],
+            'unsafe_git_directory': ['dubious ownership', 'unsafe repository'],
+            'out_of_memory': ['outofmemoryerror'],
+        }.items()}
     print(json.dumps({'sonarqube_quality_gate_passed': result.returncode == 0,
+        'scanner_exit_code': result.returncode,
         'quality_gate_rejected': 'quality gate status: failed' in text,
         'authentication_failure': 'not authorized' in text or 'authentication failed' in text,
-        'analysis_submitted': 'analysis report uploaded' in text}))
+        'analysis_submitted': 'analysis report uploaded' in text,
+        'scanner_failure_categories': categories}))
     return result.returncode == 0
 
 
@@ -195,6 +216,7 @@ def scan(cfg):
     if not json.loads(bom).get('components'):
         raise RuntimeError('Refusing to scan an empty SBOM')
     token = login(cfg)
+    print(json.dumps({'vault_authenticated': True}))
     headers = {'X-Vault-Token': token}
     try:
         def read(service):
@@ -202,12 +224,15 @@ def scan(cfg):
             return request(cfg['vault_url'] + '/v1/' + path, headers=headers)['data']['data']
         dt = read('dependency-track')
         sq = read('sonarqube')
+        print(json.dumps({'scanner_credentials_loaded': True}))
         results = []
-        for action in (lambda: dependency_track(dt, bom), lambda: sonar(sq)):
+        for name, action in [('dependency_track', lambda: dependency_track(dt, bom)),
+                             ('sonarqube', lambda: sonar(sq))]:
             try:
                 results.append(action())
             except Exception as error:
-                print(json.dumps({'security_check_failed': True, 'error_type': type(error).__name__}))
+                print(json.dumps({'security_check_failed': True, 'check': name,
+                    'error_type': type(error).__name__}))
                 results.append(False)
         if not all(results):
             raise RuntimeError('One or more security gates failed; publication blocked')
