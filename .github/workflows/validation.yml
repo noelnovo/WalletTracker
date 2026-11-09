@@ -25,7 +25,7 @@ jobs:
           python-version: '3.13'
       - run: python3 -m scripts.ci.verify_contract
       - run: python3 -m unittest discover -s tests/automation -p 'test_*.py'
-      - run: python3 -m unittest discover -s ci -p 'test_security_gate.py'
+      - run: python3 -m unittest discover -s ci -p 'test_*.py'
 
   unsigned-build:
     needs: checks
@@ -77,6 +77,9 @@ jobs:
 
   security:
     if: github.event_name == 'push'
+    concurrency:
+      group: wallettracker-security-analysis
+      cancel-in-progress: false
     needs: [checks, unsigned-build]
     runs-on: ubuntu-latest
     timeout-minutes: 20
