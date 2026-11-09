@@ -1,0 +1,50 @@
+name: Android security integration probe
+on:
+  push:
+    branches: [test/android-security-probe-20261109]
+permissions:
+  contents: read
+concurrency:
+  group: android-security-probe-20261109
+  cancel-in-progress: false
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require unchanged application and build inputs from the verified unsigned build
+        run: git diff --exit-code 973c28f1dc7c23f041933ea79cdeb1bcd5e2420f HEAD -- app gradle build.gradle.kts settings.gradle.kts gradle.properties
+      - name: Verify the immutable build artifact identity
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request
+          req = urllib.request.Request('https://api.github.com/repos/noelnovo/WalletTracker/actions/artifacts/13705843567', headers={'Authorization': 'Bearer ' + os.environ['GITHUB_TOKEN'], 'User-Agent': 'DownOps-Security-Probe'})
+          with urllib.request.urlopen(req, timeout=30) as response:
+              artifact = json.load(response)
+          assert artifact['expired'] is False
+          assert artifact['digest'] == 'sha256:1ffdee73ea49f1260b4579f5cf2c6ec76436ff5477785a3f5a9e90f1a70720f5'
+          assert artifact['workflow_run']['id'] == 42689598629
+          assert artifact['workflow_run']['head_sha'] == '973c28f1dc7c23f041933ea79cdeb1bcd5e2420f'
+          print('exact-source-security-artifact-verified')
+          PY
+      - uses: actions/download-artifact@v4
+        with:
+          artifact-ids: '13705843567'
+          run-id: 42689598629
+          github-token: ${{ github.token }}
+          merge-multiple: true
+          path: .
+      - run: python3 -m unittest discover -s ci -p test_security_gate.py
+      - run: python3 ci/security_gate.py prepare
+      - name: Real OIDC, Dependency-Track, and SonarQube checks without signing or release
+        run: python3 ci/security_gate.py scan
