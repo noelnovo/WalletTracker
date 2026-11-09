@@ -82,12 +82,12 @@ class SecurityTests(unittest.TestCase):
     def test_clean_pass(self):
         self.assertTrue(self.run_dt(self.dt_responses()))
 
-    def test_high_and_critical_fail(self):
+    def test_high_and_critical_are_reported_for_sonar_to_evaluate(self):
         for severity in ['HIGH', 'CRITICAL']:
-            self.assertFalse(self.run_dt(self.dt_responses([{'vulnerability': {'severity': severity}}])))
+            self.assertTrue(self.run_dt(self.dt_responses([{'vulnerability': {'severity': severity}}])))
 
-    def test_policy_fail(self):
-        self.assertFalse(self.run_dt(self.dt_responses(policy=1)))
+    def test_policy_counts_do_not_override_the_sonar_gate_threshold(self):
+        self.assertTrue(self.run_dt(self.dt_responses(policy=1)))
 
     def test_invalid_processing_fails(self):
         with self.assertRaises(RuntimeError):
@@ -100,7 +100,65 @@ class SecurityTests(unittest.TestCase):
     def test_pagination(self):
         page = [{'vulnerability': {'severity': 'LOW'}}] * 100
         responses = self.dt_responses()[:2] + [page, [{'vulnerability': {'severity': 'HIGH'}}], {'policyViolationsFail': 0}]
-        self.assertFalse(self.run_dt(responses))
+        self.assertTrue(self.run_dt(responses))
+
+    def test_plugin_settings_are_synchronized_from_vault_in_https_bodies(self):
+        settings = {'SONAR_SETTINGS_TOKEN': 'synthetic-settings-token',
+            'SONAR_HOST_URL': 'https://sonar.example.test', 'SONAR_PROJECT_KEY': 'android'}
+        reader = {'DT_URL': 'https://dt.example.test', 'DT_PROJECT_UUID': 'project',
+                  'DT_API_KEY': 'synthetic-read-only-key'}
+        expected = [{'metric': 'new_dependencytrack_fixed_medium', 'op': 'GT', 'error': '2'}]
+        responses = [{}, {}, {}, {'qualityGate': {'name': 'Configured by owner'}}, {'conditions': expected}]
+        with patch.object(gate, 'request', side_effect=responses) as request:
+            self.assertEqual(gate.synchronize_plugin(settings, reader), expected)
+        calls = request.call_args_list
+        self.assertEqual(calls[2].args[2], {'component': 'android',
+            'key': 'sonar.dependencytrack.api.key', 'value': 'synthetic-read-only-key'})
+        for call in calls[:3]:
+            self.assertTrue(call.kwargs['form'])
+            self.assertNotIn('synthetic-read-only-key', call.args[0])
+            self.assertNotIn('synthetic-settings-token', call.args[0])
+
+    def test_missing_dependency_conditions_fail_closed(self):
+        settings = {'SONAR_SETTINGS_TOKEN': 'synthetic', 'SONAR_HOST_URL': 'https://sonar.example.test',
+                    'SONAR_PROJECT_KEY': 'android'}
+        reader = {'DT_URL': 'https://dt.example.test', 'DT_PROJECT_UUID': 'project', 'DT_API_KEY': 'synthetic'}
+        with patch.object(gate, 'request', side_effect=[{}, {}, {}, {'qualityGate': {'name': 'Sonar way'}}, {'conditions': []}]):
+            with self.assertRaises(RuntimeError):
+                gate.synchronize_plugin(settings, reader)
+
+    def verify_plugin(self, conditions, status='OK', task_project='android', expected=None):
+        settings = {'SONAR_SETTINGS_TOKEN': 'synthetic', 'SONAR_HOST_URL': 'https://sonar.example.test',
+                    'SONAR_PROJECT_KEY': 'android'}
+        if expected is None:
+            expected = [{'metric': 'new_dependencytrack_fixed_medium', 'op': 'GT', 'error': '2'}]
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            (root / '.scannerwork').mkdir()
+            (root / '.scannerwork/report-task.txt').write_text('ceTaskId=exact-task\n')
+            responses = [{'task': {'status': 'SUCCESS', 'componentKey': task_project, 'analysisId': 'exact-analysis'}},
+                         {'projectStatus': {'status': status, 'conditions': conditions}}]
+            with patch.object(gate, 'ROOT', root), patch.object(gate, 'request', side_effect=responses) as request:
+                result = gate.verify_plugin_gate(settings, expected)
+                self.assertIn('analysisId=exact-analysis', request.call_args.args[0])
+                return result
+
+    def test_configured_plugin_metric_can_fail_sonar_gate(self):
+        condition = {'metricKey': 'new_dependencytrack_fixed_medium', 'comparator': 'GT',
+                     'actualValue': '3', 'errorThreshold': '2', 'status': 'ERROR'}
+        self.assertFalse(self.verify_plugin([condition], 'ERROR'))
+        condition.update(actualValue='1', status='OK')
+        self.assertTrue(self.verify_plugin([condition]))
+
+    def test_missing_or_changed_plugin_measure_fails_closed(self):
+        for conditions in [[], [{'metricKey': 'new_dependencytrack_fixed_medium', 'comparator': 'GT',
+                'actualValue': '0', 'errorThreshold': '999', 'status': 'OK'}]]:
+            with self.assertRaises(RuntimeError):
+                self.verify_plugin(conditions)
+
+    def test_other_project_cannot_supply_plugin_evidence(self):
+        with self.assertRaises(RuntimeError):
+            self.verify_plugin([], task_project='another-project')
 
     def test_redirects_refused(self):
         self.assertIsNone(gate.NoRedirect().redirect_request(None, None, None, None, None, None))

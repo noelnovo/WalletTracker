@@ -54,6 +54,39 @@ data or substitute a different signing identity.
 and pull requests: source checks, automation tests, JVM tests, and debug/unsigned
 release builds. GitLab remains a passive backup with CI disabled.
 
+### Security checks
+
+On trusted DEV/MAIN pushes, `security` runs after checks and the unsigned build.
+It uploads the resolved CycloneDX SBOM, waits for Dependency-Track analysis,
+synchronizes this project's plugin settings from Vault, then runs SonarQube.
+The assigned **SonarQube quality gate** evaluates the Dependency-Track plugin's
+metrics: severity/fixable/policy thresholds are configured in SonarQube, not
+hard-coded in Python. A missing plugin metric or failed quality gate blocks CI.
+PR jobs do not receive scanner credentials. MAIN release signing requires the
+successful security job for that exact validated commit.
+
+GitHub OIDC obtains a short-lived `security-ci-android` Vault token only for the
+exact repository, trusted branch, push event, and validation workflow. Its reads
+are restricted to these `downops/` KV-v2 records:
+
+| Record | Purpose |
+| --- | --- |
+| `services/dependency-track/clients/instance-005` | Android-only SBOM upload |
+| `services/dependency-track/sonarqube/instance-005` | Android-only read-only plugin key |
+| `services/sonarqube/clients/instance-005` | Project analysis token |
+| `services/sonarqube/project-settings/instance-005` | Dedicated project-settings token |
+
+Values are fetched at job time and sent through verified HTTPS or scanner
+environment variables, never token arguments or tracked files. Plugin settings
+are reconciled through the supported SonarQube API on each trusted run, so a
+Vault key update is applied without manually copying it into the UI. The settings
+identity administers only this project; SonarQube's mandatory default group also
+grants analysis/project creation, an explicitly accepted platform limitation.
+Its recovery password is operator-only and is not readable by CI. Dependency-Track
+portfolio ACLs restrict the uploader and separate plugin reader to this project.
+
+### Production releases
+
 [WalletTracker production release](.github/workflows/android.yml) runs only on
 version tags. It waits for successful MAIN validation of the **exact tag commit**
 and reuses that run's immutable, checksum-bound unsigned APK. It does not repeat

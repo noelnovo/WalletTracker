@@ -1,5 +1,6 @@
 """Job-time SonarQube and Dependency-Track gates. Never log credentials/payloads."""
 import base64
+from decimal import Decimal
 import hashlib
 import json
 import os
@@ -22,13 +23,13 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def request(url, method='GET', data=None, headers=None):
+def request(url, method='GET', data=None, headers=None, *, form=False):
     parsed = urllib.parse.urlsplit(url)
     if parsed.scheme != 'https' or parsed.username or parsed.password:
         raise RuntimeError('Verified HTTPS without URL credentials is required')
     req = urllib.request.Request(url, method=method,
-        data=None if data is None else json.dumps(data).encode(),
-        headers={'Content-Type': 'application/json',
+        data=None if data is None else (urllib.parse.urlencode(data).encode() if form else json.dumps(data).encode()),
+        headers={'Content-Type': 'application/x-www-form-urlencoded' if form else 'application/json',
                  'User-Agent': 'Mozilla/5.0 DownOps-Security-CI', **(headers or {})})
     try:
         with urllib.request.build_opener(NoRedirect()).open(req, timeout=60) as response:
@@ -164,15 +165,74 @@ def dependency_track(creds, bom, *, wait=time.sleep):
     policy_failures = metrics.get('policyViolationsFail')
     if not isinstance(policy_failures, int):
         raise RuntimeError('Dependency-Track policy metrics are unavailable')
-    passed = not (counts.get('CRITICAL', 0) or counts.get('HIGH', 0) or policy_failures)
     print(json.dumps({'dependency_track_completed': True, 'findings': counts,
-        'policy_failures': policy_failures, 'dependency_track_gate_passed': passed}))
-    return passed
+        'policy_failures': policy_failures, 'quality_gate_authority': 'sonarqube-plugin'}))
+    # Findings are measures, not a second hard-coded policy. The configured
+    # SonarQube gate owns severity/fixable/policy thresholds.
+    return True
+
+
+def sonar_request(creds, path, data=None):
+    token = creds['SONAR_SETTINGS_TOKEN']
+    headers = {'Authorization': 'Basic ' + base64.b64encode((token + ':').encode()).decode()}
+    return request(creds['SONAR_HOST_URL'].rstrip('/') + path,
+        'GET' if data is None else 'POST', data, headers, form=data is not None)
+
+
+def synchronize_plugin(settings, reader):
+    project = settings['SONAR_PROJECT_KEY']
+    parameters = {'sonar.dependencytrack.url': reader['DT_URL'],
+        'sonar.dependencytrack.project.uuid': reader['DT_PROJECT_UUID'],
+        'sonar.dependencytrack.api.key': reader['DT_API_KEY']}
+    for key, value in parameters.items():
+        # Supported Sonar API, with Vault-injected values in HTTPS bodies only.
+        sonar_request(settings, '/api/settings/set', {'component': project, 'key': key, 'value': value})
+    gate = sonar_request(settings, '/api/qualitygates/get_by_project?'
+        + urllib.parse.urlencode({'project': project}))['qualityGate']
+    details = sonar_request(settings, '/api/qualitygates/show?'
+        + urllib.parse.urlencode({'name': gate['name']}))
+    expected = [c for c in details['conditions'] if c['metric'].startswith('new_dependencytrack_')]
+    if not expected:
+        raise RuntimeError('The assigned Sonar quality gate has no Dependency-Track conditions')
+    print(json.dumps({'sonar_plugin_settings_synchronized': True,
+        'dependencytrack_gate_conditions': [c['metric'] for c in expected]}))
+    return expected
+
+
+def verify_plugin_gate(settings, expected):
+    report = ROOT / '.scannerwork/report-task.txt'
+    values = dict(line.split('=', 1) for line in report.read_text().splitlines() if '=' in line)
+    task = sonar_request(settings, '/api/ce/task?'
+        + urllib.parse.urlencode({'id': values['ceTaskId']}))['task']
+    if task.get('status') != 'SUCCESS' or task.get('componentKey') != settings['SONAR_PROJECT_KEY']:
+        raise RuntimeError('Cannot verify completed analysis for this project')
+    status = sonar_request(settings, '/api/qualitygates/project_status?'
+        + urllib.parse.urlencode({'analysisId': task['analysisId']}))['projectStatus']
+    actual = {c['metricKey']: c for c in status['conditions']}
+    diagnostics = []
+    for configured in expected:
+        condition = actual.get(configured['metric'])
+        if not condition or condition.get('status') not in ['OK', 'ERROR']:
+            raise RuntimeError('A configured Dependency-Track metric was not evaluated')
+        value = Decimal(condition['actualValue'])
+        threshold = Decimal(condition['errorThreshold'])
+        if not value.is_finite() or not threshold.is_finite():
+            raise RuntimeError('Dependency-Track gate returned invalid numeric values')
+        if threshold != Decimal(configured['error']) or condition['comparator'] != configured['op']:
+            raise RuntimeError('Dependency-Track gate configuration changed during analysis')
+        diagnostics.append({'metric': configured['metric'], 'value': str(value),
+            'threshold': str(threshold), 'comparator': condition['comparator'],
+            'status': condition['status']})
+    print(json.dumps({'dependencytrack_metrics_evaluated': True,
+        'sonar_quality_gate_status': status['status'], 'dependencytrack_conditions': diagnostics}))
+    return status['status'] == 'OK'
 
 
 def sonar(creds):
     env = dict(os.environ, SONAR_TOKEN=creds['SONAR_TOKEN'],
         SONAR_HOST_URL=creds['SONAR_HOST_URL'])
+    # Never accept a stale report from a previous scanner invocation.
+    (ROOT / '.scannerwork/report-task.txt').unlink(missing_ok=True)
     result = subprocess.run(['docker', 'run', '--rm',
         '--user', str(os.getuid()) + ':' + str(os.getgid()),
         # The image wrapper converts SONAR_TOKEN into a command-line property.
@@ -224,18 +284,28 @@ def scan(cfg):
             return request(cfg['vault_url'] + '/v1/' + path, headers=headers)['data']['data']
         dt = read('dependency-track')
         sq = read('sonarqube')
+        reader = request(cfg['vault_url'] + '/v1/downops/data/services/dependency-track/sonarqube/'
+            + cfg['instance'], headers=headers)['data']['data']
+        settings = request(cfg['vault_url'] + '/v1/downops/data/services/sonarqube/project-settings/'
+            + cfg['instance'], headers=headers)['data']['data']
+        if (reader['DT_PROJECT_UUID'] != dt['DT_PROJECT_UUID']
+            or reader['DT_URL'] != dt['DT_URL']
+            or settings['SONAR_PROJECT_KEY'] != sq['SONAR_PROJECT_KEY']
+            or settings['SONAR_HOST_URL'] != sq['SONAR_HOST_URL']):
+            raise RuntimeError('Scanner and plugin credentials refer to different projects')
         print(json.dumps({'scanner_credentials_loaded': True}))
-        results = []
-        for name, action in [('dependency_track', lambda: dependency_track(dt, bom)),
-                             ('sonarqube', lambda: sonar(sq))]:
-            try:
-                results.append(action())
-            except Exception as error:
-                print(json.dumps({'security_check_failed': True, 'check': name,
-                    'error_type': type(error).__name__}))
-                results.append(False)
-        if not all(results):
-            raise RuntimeError('One or more security gates failed; publication blocked')
+        # Preserve ordering: current BOM analysis -> secret/config synchronization
+        # -> plugin measures -> configured quality gate. Never analyze stale DT data.
+        print(json.dumps({'security_stage': 'dependency_track_analysis'}))
+        dependency_track(dt, bom)
+        print(json.dumps({'security_stage': 'sonar_plugin_configuration'}))
+        expected = synchronize_plugin(settings, reader)
+        print(json.dumps({'security_stage': 'sonar_analysis'}))
+        scanner_passed = sonar(sq)
+        print(json.dumps({'security_stage': 'sonar_plugin_gate_verification'}))
+        gate_passed = verify_plugin_gate(settings, expected)
+        if not scanner_passed or not gate_passed:
+            raise RuntimeError('SonarQube quality gate failed; publication blocked')
     finally:
         request(cfg['vault_url'] + '/v1/auth/token/revoke-self', 'POST', {}, headers)
 
