@@ -1,4 +1,8 @@
 # Android/Gradle
+/bom.json
+/security-image.tar
+/security-image.json
+/.scannerwork/
 *.iml
 .gradle/
 build/
