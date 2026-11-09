@@ -2,11 +2,13 @@ name: WalletTracker trusted pre-merge security
 on:
   pull_request_target:
     branches: [dev, main]
-    types: [opened, synchronize, reopened, ready_for_review, edited]
+    # Drafts are analyzed too; marking the same revision ready need not rebuild.
+    types: [opened, synchronize, reopened, edited]
 permissions:
   contents: read
 concurrency:
   group: wallettracker-premerge-${{ github.event.pull_request.number }}
+  queue: max
   cancel-in-progress: false
 jobs:
   context:
@@ -69,6 +71,7 @@ jobs:
     timeout-minutes: 20
     concurrency:
       group: wallettracker-security-analysis
+      queue: max
       cancel-in-progress: false
     permissions:
       contents: read
