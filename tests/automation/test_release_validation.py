@@ -23,10 +23,19 @@ def artifact():
 
 def jobs():
     return {'jobs': [{'name': name, 'status': 'completed', 'conclusion': 'success'}
-                     for name in ('checks', 'unsigned-build')]}
+                     for name in ('checks', 'unsigned-build', 'security')]}
 
 
 class ReleaseEvidenceTests(unittest.TestCase):
+    def test_security_gate_is_mandatory_before_signing(self):
+        for state in ['missing', 'failure', 'skipped']:
+            evidence = jobs()
+            if state == 'missing':
+                evidence['jobs'] = [job for job in evidence['jobs'] if job['name'] != 'security']
+            else:
+                evidence['jobs'][-1]['conclusion'] = state
+            with self.subTest(state=state), patch.object(gate, 'api', return_value=evidence), self.assertRaises(RuntimeError):
+                gate.verify_completed_run(run(), 'synthetic-token')
     def test_pr_dev_wrong_workflow_and_foreign_repository_cannot_supply_evidence(self):
         self.assertTrue(gate.trusted_run(run(), SHA))
         for change in [{'event': 'pull_request'}, {'head_branch': 'dev'}, {'head_sha': 'b' * 40},
