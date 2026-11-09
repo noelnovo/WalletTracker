@@ -1,4 +1,0 @@
-# GitHub Actions is authoritative; GitLab is a passive repository backup.
-workflow:
-  rules:
-    - when: never

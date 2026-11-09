@@ -144,10 +144,10 @@ class ProductionSigningTests(unittest.TestCase):
             self.assertNotIn('registration_enabled', receipt)
 
     def test_gitlab_is_passive_backup_only(self):
-        pipeline = (build_prod.ROOT / '.gitlab-ci.yml').read_text()
-        self.assertIn('when: never', pipeline)
-        self.assertNotIn('include:', pipeline)
+        self.assertFalse((build_prod.ROOT / '.gitlab-ci.yml').exists())
         self.assertFalse((build_prod.ROOT / '.gitlab/ci/pipeline.yml').exists())
+        self.assertTrue((build_prod.ROOT / '.github/workflows/validation.yml').is_file())
+        self.assertTrue((build_prod.ROOT / '.github/workflows/android.yml').is_file())
 
     def test_shared_android_image_installs_source_validation_tools(self):
         workflow = (build_prod.ROOT / '.github/workflows/android.yml').read_text()
