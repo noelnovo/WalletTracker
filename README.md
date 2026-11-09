@@ -74,6 +74,9 @@ cancelled or skipped producer cannot yield a passing security status. A changed
 head/base/candidate invalidates the run. DEV and MAIN use different required
 statuses (`security/sonarqube-dtrack-dev` and `security/sonarqube-dtrack-main`)
 and strict up-to-date branch checks; a DEV result cannot authorize a MAIN merge.
+CI control paths have base-branch CODEOWNERS review protection. A separate
+review-only ruleset permits the repository owner to bypass self-review, while
+the required security checks remain enforced for administrators as well.
 Post-merge push validation remains a second check, not the merge gate. Both paths
 serialize access to the shared Community Edition Sonar/DT project. This is snapshot
 analysis with exact analysis-ID verification, not edition-gated native PR decoration.
