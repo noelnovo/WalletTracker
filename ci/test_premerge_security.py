@@ -15,8 +15,12 @@ import premerge_security as control
 HEAD = 'a' * 40
 BASE = 'b' * 40
 CANDIDATE = 'c' * 40
+CONTROLLER = 'e' * 40
 ENV = {'GITHUB_EVENT_NAME': 'pull_request_target', 'GITHUB_REPOSITORY': control.REPOSITORY,
-       'GITHUB_SHA': BASE, 'GITHUB_RUN_ID': '12', 'GITHUB_RUN_ATTEMPT': '1', 'GITHUB_TOKEN': 'synthetic'}
+       'GITHUB_SHA': CONTROLLER, 'GITHUB_WORKFLOW_SHA': CONTROLLER,
+       'GITHUB_REF': 'refs/heads/main',
+       'GITHUB_WORKFLOW_REF': control.REPOSITORY + '/.github/workflows/premerge-security.yml@refs/heads/main',
+       'GITHUB_RUN_ID': '12', 'GITHUB_RUN_ATTEMPT': '1', 'GITHUB_TOKEN': 'synthetic'}
 
 
 def event():
@@ -60,6 +64,17 @@ def build_zip(extra=None, link=False):
 
 
 class PremergeTests(unittest.TestCase):
+    def test_controller_default_main_is_independent_of_pr_target_base(self):
+        with patch.object(control, 'api', return_value={'commit': {'sha': CONTROLLER}}):
+            self.assertEqual(control.trusted_controller(ENV), CONTROLLER)
+        self.assertNotEqual(CONTROLLER, event()['pull_request']['base']['sha'])
+
+    def test_stale_or_wrong_workflow_controller_is_rejected(self):
+        with patch.object(control, 'api', return_value={'commit': {'sha': BASE}}), self.assertRaises(RuntimeError):
+            control.trusted_controller(ENV)
+        with self.assertRaises(RuntimeError):
+            control.trusted_controller(dict(ENV, GITHUB_WORKFLOW_SHA=BASE))
+
     def test_only_trusted_target_event_is_accepted(self):
         self.assertEqual(control.event_identity(event(), ENV)['target'], 'dev')
         for key, value in [('GITHUB_EVENT_NAME', 'pull_request'), ('GITHUB_REPOSITORY', 'attacker/repo')]:
@@ -177,6 +192,7 @@ class PremergeTests(unittest.TestCase):
             env = dict(ENV, PREMERGE_BUILD_RESULT='success', PREMERGE_CANDIDATE=CANDIDATE)
             identity = control.event_identity(event(), ENV)
             with patch.dict(os.environ, env, clear=True), patch.object(control, 'TRUSTED_ROOT', root), \
+                 patch.object(control, 'trusted_controller', return_value=CONTROLLER), \
                  patch.object(control, 'current_candidate', side_effect=[CANDIDATE, last]), \
                  patch.object(control, 'artifact_for_run', return_value=b'data'), \
                  patch.object(control, 'http', return_value=b'data'), \
@@ -202,6 +218,9 @@ class PremergeTests(unittest.TestCase):
         self.assertIn('ref: ${{ github.sha }}', gate)
         self.assertNotIn('ref: ${{ needs.context.outputs.candidate }}', gate)
         self.assertNotIn('gradlew', gate)
+        self.assertIn('queue: max', gate)
+        validation = (control.TRUSTED_ROOT / '.github/workflows/validation.yml').read_text()
+        self.assertGreaterEqual(validation.count('queue: max'), 2)
 
 
 if __name__ == '__main__':
