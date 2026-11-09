@@ -37,7 +37,7 @@ def verify_completed_run(run, token):
     if run.get('status') != 'completed' or run.get('conclusion') != 'success':
         raise RuntimeError('Exact-source MAIN validation did not succeed')
     jobs = api(f'/actions/runs/{run_id}/attempts/{attempt}/jobs?per_page=100', token)['jobs']
-    for name in ('checks', 'unsigned-build'):
+    for name in ('checks', 'unsigned-build', 'security'):
         matches = [job for job in jobs if job.get('name') == name]
         if len(matches) != 1 or matches[0].get('status') != 'completed' or matches[0].get('conclusion') != 'success':
             raise RuntimeError('Required MAIN validation job is absent, skipped, or unsuccessful')

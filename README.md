@@ -54,6 +54,58 @@ data or substitute a different signing identity.
 and pull requests: source checks, automation tests, JVM tests, and debug/unsigned
 release builds. GitLab remains a passive backup with CI disabled.
 
+### Security checks
+
+Pull requests into DEV and MAIN must pass the trusted pre-merge workflow before
+merging. It validates the exact head/base/merge candidate, builds in a separate
+credential-free hosted job, then scans the candidate with a trusted-base controller.
+The credentialed job never executes PR scripts/actions/build tools. It downloads
+source independently from GitHub and treats SBOM/bytecode artifacts as bounded,
+checksum-verified data, rejecting links, traversal and unexpected paths. Scanner
+configuration and control scripts come from the trusted base, not the PR.
+
+The controller uploads the resolved CycloneDX SBOM, waits for Dependency-Track
+analysis, synchronizes this project's plugin settings from Vault, then runs SonarQube.
+The assigned **SonarQube quality gate** evaluates the Dependency-Track plugin's
+metrics: severity/fixable/policy thresholds are configured in SonarQube, not
+hard-coded in Python. A missing plugin metric or failed quality gate blocks CI.
+PR-controlled build jobs do not receive scanner credentials. A missing, failed,
+cancelled or skipped producer cannot yield a passing security status. A changed
+head/base/candidate invalidates the run. DEV and MAIN use different required
+statuses (`security/sonarqube-dtrack-dev` and `security/sonarqube-dtrack-main`)
+and strict up-to-date branch checks; a DEV result cannot authorize a MAIN merge.
+CI control paths have base-branch CODEOWNERS review protection. A separate
+review-only ruleset permits the repository owner to bypass self-review, while
+the required security checks remain enforced for administrators as well.
+Post-merge push validation remains a second check, not the merge gate. Both paths
+serialize access to the shared Community Edition Sonar/DT project. This is snapshot
+analysis with exact analysis-ID verification, not edition-gated native PR decoration.
+MAIN release signing still requires its exact-commit successful push validation.
+
+GitHub OIDC obtains short-lived Vault tokens: `security-ci-android-pr` only for
+the trusted `pull_request_target` controller on DEV/MAIN, and `security-ci-android`
+only for the post-merge push validation workflow. The PR build job has no OIDC
+permission. Both readers' paths
+are restricted to these `downops/` KV-v2 records:
+
+| Record | Purpose |
+| --- | --- |
+| `services/dependency-track/clients/instance-005` | Android-only SBOM upload |
+| `services/dependency-track/sonarqube/instance-005` | Android-only read-only plugin key |
+| `services/sonarqube/clients/instance-005` | Project analysis token |
+| `services/sonarqube/project-settings/instance-005` | Dedicated project-settings token |
+
+Values are fetched at job time and sent through verified HTTPS or scanner
+environment variables, never token arguments or tracked files. Plugin settings
+are reconciled through the supported SonarQube API on each trusted run, so a
+Vault key update is applied without manually copying it into the UI. The settings
+identity administers only this project; SonarQube's mandatory default group also
+grants analysis/project creation, an explicitly accepted platform limitation.
+Its recovery password is operator-only and is not readable by CI. Dependency-Track
+portfolio ACLs restrict the uploader and separate plugin reader to this project.
+
+### Production releases
+
 [WalletTracker production release](.github/workflows/android.yml) runs only on
 version tags. It waits for successful MAIN validation of the **exact tag commit**
 and reuses that run's immutable, checksum-bound unsigned APK. It does not repeat

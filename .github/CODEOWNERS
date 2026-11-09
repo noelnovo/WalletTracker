@@ -1,0 +1,6 @@
+# Trusted control plane: base-branch ownership is enforced by a separate review
+# ruleset. Owner review bypass does not bypass the required security checks.
+/.github/ @noelnovo
+/ci/ @noelnovo
+/scripts/ci/ @noelnovo
+/sonar-project.properties @noelnovo

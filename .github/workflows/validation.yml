@@ -25,6 +25,7 @@ jobs:
           python-version: '3.13'
       - run: python3 -m scripts.ci.verify_contract
       - run: python3 -m unittest discover -s tests/automation -p 'test_*.py'
+      - run: python3 -m unittest discover -s ci -p 'test_*.py'
 
   unsigned-build:
     needs: checks
@@ -42,7 +43,19 @@ jobs:
           packages: platform-tools
       - run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
       - name: Test and build APKs
-        run: sh gradlew --no-daemon --max-workers=2 '-Dorg.gradle.jvmargs=-Xmx1536m -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8' -Pkotlin.compiler.execution.strategy=in-process testDebugUnitTest assembleDebug assembleRelease
+        run: sh gradlew --no-daemon --max-workers=2 '-Dorg.gradle.jvmargs=-Xmx1536m -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8' -Pkotlin.compiler.execution.strategy=in-process testDebugUnitTest assembleDebug assembleRelease cyclonedxBom
+      - name: Retain resolved SBOM and bytecode for exact-source security analysis
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-input-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            build/reports/cyclonedx/bom.json
+            app/build/intermediates/javac/**/classes/**
+            app/build/tmp/kotlin-classes/**
+            app/build/intermediates/built_in_kotlinc/**/classes/**
+          if-no-files-found: error
+          retention-days: 7
       - uses: actions/upload-artifact@v4
         with:
           name: unsigned-build-test-reports-${{ github.run_id }}-${{ github.run_attempt }}
@@ -61,3 +74,28 @@ jobs:
           path: artifacts/validated-input/
           if-no-files-found: error
           retention-days: 90
+
+  security:
+    if: github.event_name == 'push'
+    concurrency:
+      group: wallettracker-security-analysis
+      cancel-in-progress: false
+    needs: [checks, unsigned-build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: security-input-${{ github.sha }}-${{ github.run_attempt }}
+          path: .
+      - name: Validate resolved CycloneDX SBOM
+        run: python3 ci/security_gate.py prepare
+      - name: Enforce SonarQube quality gate and Dependency-Track vulnerability gate
+        run: python3 ci/security_gate.py scan

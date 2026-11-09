@@ -1,0 +1,12 @@
+{
+  "provider": "github",
+  "repository": "noelnovo/WalletTracker",
+  "workflow": "validation.yml",
+  "branches": ["dev", "main"],
+  "vault_url": "https://vault.downops.win",
+  "audience": "https://vault.downops.win",
+  "auth_mount": "github-actions",
+  "role": "security-ci-android",
+  "instance": "instance-005",
+  "sbom": "gradle"
+}
