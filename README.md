@@ -133,3 +133,5 @@ features. Never move an existing version tag or bypass production approval.
 
 The old v1 screenshots have been removed. Personal wallet data is never used for
 public screenshots.
+
+<!-- Pre-merge security enforcement fixture: do not merge this review. -->
