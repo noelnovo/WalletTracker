@@ -11,6 +11,7 @@ permissions:
 
 concurrency:
   group: wallettracker-validation-${{ github.ref }}
+  queue: max
   cancel-in-progress: false
 
 jobs:
@@ -79,6 +80,7 @@ jobs:
     if: github.event_name == 'push'
     concurrency:
       group: wallettracker-security-analysis
+      queue: max
       cancel-in-progress: false
     needs: [checks, unsigned-build]
     runs-on: ubuntu-latest

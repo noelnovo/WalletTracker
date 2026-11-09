@@ -111,6 +111,27 @@ def current_candidate(identity):
     return candidate
 
 
+def trusted_controller(env):
+    # pull_request_target executes the default-main control plane, even when
+    # the PR targets DEV. The target base is validated separately above.
+    controller = sha(env.get('GITHUB_SHA'))
+    workflow_sha = sha(env.get('GITHUB_WORKFLOW_SHA'))
+    allowed = {REPOSITORY + '/.github/workflows/premerge-security.yml@refs/heads/' + b
+               for b in ['dev', 'main']}
+    print(json.dumps({'controller_identity': {'controller_sha': controller,
+        'workflow_sha': workflow_sha, 'workflow_ref_expected': env.get('GITHUB_WORKFLOW_REF') in allowed,
+        'event_ref_expected': env.get('GITHUB_REF') in ['refs/heads/dev', 'refs/heads/main']}}))
+    if (env.get('GITHUB_WORKFLOW_REF') not in allowed
+        or env.get('GITHUB_REF') not in ['refs/heads/dev', 'refs/heads/main']
+        or workflow_sha != controller):
+        raise RuntimeError('Unexpected trusted workflow identity')
+    if api('/branches/main')['commit']['sha'] != controller:
+        raise RuntimeError('Trusted default controller changed; a new run is required')
+    print(json.dumps({'trusted_controller_verified': True, 'controller_sha': controller,
+        'workflow_ref': env['GITHUB_WORKFLOW_REF'], 'event_ref': env['GITHUB_REF']}))
+    return controller
+
+
 def publish(identity, state):
     if state not in ['pending', 'success', 'failure']:
         raise RuntimeError('Unsupported status')
@@ -221,8 +242,7 @@ def artifact_for_run(candidate):
 
 
 def prepare(identity):
-    if os.environ.get('GITHUB_SHA') != identity['base']:
-        raise RuntimeError('Controller must execute the exact trusted base commit')
+    trusted_controller(os.environ)
     publish(identity, 'pending')
     candidate = None
     for attempt in range(5):
@@ -243,8 +263,7 @@ def prepare(identity):
 def evaluate(identity):
     if os.environ.get('PREMERGE_BUILD_RESULT') != 'success':
         raise RuntimeError('Failed, cancelled, or skipped build cannot satisfy security')
-    if os.environ.get('GITHUB_SHA') != identity['base']:
-        raise RuntimeError('Untrusted controller revision')
+    trusted_controller(os.environ)
     candidate = sha(os.environ['PREMERGE_CANDIDATE'])
     if current_candidate(identity) != candidate:
         raise RuntimeError('Merge candidate changed before analysis')
@@ -261,6 +280,7 @@ def evaluate(identity):
         security_gate.ROOT = work
         security_gate.prepare(cfg)
         security_gate.scan(cfg)
+    trusted_controller(os.environ)
     if current_candidate(identity) != candidate:
         raise RuntimeError('PR or base changed during analysis; success refused')
     publish(identity, 'success')
@@ -284,7 +304,15 @@ def main():
                 publish(identity, 'failure')
             except Exception:
                 pass  # Missing/pending status remains blocking, never green.
-        print(json.dumps({'premerge_security_failed': True, 'error_type': type(error).__name__}))
+        reasons = {'Unexpected trusted workflow identity': 'workflow_identity_mismatch',
+            'Trusted default controller changed; a new run is required': 'stale_controller',
+            'PR head or base changed; a new run is required': 'stale_pr',
+            'Merge candidate does not match the exact PR head/base': 'candidate_parent_mismatch',
+            'Failed, cancelled, or skipped build cannot satisfy security': 'producer_not_successful',
+            'SonarQube quality gate failed; publication blocked': 'quality_gate_rejected'}
+        reason = reasons.get(str(error), 'details_withheld') if isinstance(error, RuntimeError) else 'details_withheld'
+        print(json.dumps({'premerge_security_failed': True, 'error_type': type(error).__name__,
+            'failure_reason': reason}))
         raise SystemExit(1)
 
 
