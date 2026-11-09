@@ -58,7 +58,8 @@ release builds. GitLab remains a passive backup with CI disabled.
 
 Pull requests into DEV and MAIN must pass the trusted pre-merge workflow before
 merging. It validates the exact head/base/merge candidate, builds in a separate
-credential-free hosted job, then scans the candidate with a trusted-base controller.
+credential-free hosted job, then scans the candidate with the trusted default-MAIN
+controller. The controller revision and the PR target base are checked independently.
 The credentialed job never executes PR scripts/actions/build tools. It downloads
 source independently from GitHub and treats SBOM/bytecode artifacts as bounded,
 checksum-verified data, rejecting links, traversal and unexpected paths. Scanner
@@ -78,7 +79,8 @@ CI control paths have base-branch CODEOWNERS review protection. A separate
 review-only ruleset permits the repository owner to bypass self-review, while
 the required security checks remain enforced for administrators as well.
 Post-merge push validation remains a second check, not the merge gate. Both paths
-serialize access to the shared Community Edition Sonar/DT project. This is snapshot
+serialize access to the shared Community Edition Sonar/DT project using `queue: max`
+(not GitHub's single-pending default, which cancels waiting scans). This is snapshot
 analysis with exact analysis-ID verification, not edition-gated native PR decoration.
 MAIN release signing still requires its exact-commit successful push validation.
 
