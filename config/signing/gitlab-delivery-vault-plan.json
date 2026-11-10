@@ -1,0 +1,53 @@
+{
+  "auth_mount": "gitlab-ci",
+  "scope": "GitLab Android project31 only; existing shared JWT trust and signing values unchanged",
+  "scanner_policy": "security-ci-android",
+  "scanner_paths": [
+    "downops/data/services/dependency-track/clients/instance-005",
+    "downops/data/services/sonarqube/clients/instance-005",
+    "downops/data/services/dependency-track/sonarqube/instance-005",
+    "downops/data/services/sonarqube/project-settings/instance-005"
+  ],
+  "signing_policy": "wallettracker-android-gitlab-prod",
+  "signing_path": "downops/data/apps/wallettracker/prod/mobile",
+  "roles": {
+    "security-ci-android-gitlab-mr": {
+      "role_type": "jwt", "user_claim": "user_id",
+      "bound_audiences": ["https://vault.int.downops.win"],
+      "bound_claims_type": "glob",
+      "bound_claims": {
+        "project_id": "31", "project_path": "downops/wallet-tracker-android",
+        "namespace_path": "downops", "pipeline_source": "merge_request_event"
+      },
+      "token_policies": ["security-ci-android"],
+      "token_no_default_policy": true, "token_type": "service",
+      "token_ttl": 900, "token_max_ttl": 900, "token_explicit_max_ttl": 900
+    },
+    "security-ci-android-gitlab-push": {
+      "role_type": "jwt", "user_claim": "user_id",
+      "bound_audiences": ["https://vault.int.downops.win"],
+      "bound_claims_type": "glob",
+      "bound_claims": {
+        "project_id": "31", "project_path": "downops/wallet-tracker-android",
+        "namespace_path": "downops", "pipeline_source": "push",
+        "ref_protected": "true", "ref": ["dev", "main", "v*"]
+      },
+      "token_policies": ["security-ci-android"],
+      "token_no_default_policy": true, "token_type": "service",
+      "token_ttl": 900, "token_max_ttl": 900, "token_explicit_max_ttl": 900
+    },
+    "wallettracker-android-gitlab-prod": {
+      "role_type": "jwt", "user_claim": "user_id",
+      "bound_audiences": ["https://vault.int.downops.win"],
+      "bound_claims_type": "glob",
+      "bound_claims": {
+        "project_id": "31", "project_path": "downops/wallet-tracker-android",
+        "namespace_path": "downops", "pipeline_source": "push",
+        "ref_protected": "true", "ref_type": "tag", "ref": "v*", "user_id": "1"
+      },
+      "token_policies": ["wallettracker-android-gitlab-prod"],
+      "token_no_default_policy": true, "token_type": "service",
+      "token_ttl": 900, "token_max_ttl": 900, "token_explicit_max_ttl": 900
+    }
+  }
+}
