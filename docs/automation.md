@@ -19,8 +19,8 @@ package imports rather than depending on the old flat `delivery/` search path.
 
 Signing/publication commands are CI entry points, not ordinary local development
 commands. Their source, identity, certificate, and approval checks remain intact.
-[`validation.yml`](../.github/workflows/validation.yml) validates DEV/MAIN/PRs;
-[`android.yml`](../.github/workflows/android.yml) is tag-only production release.
+GitLab CI (`.gitlab-ci.yml`) validates DEV/MAIN/MRs and releases protected
+version tags; the GitHub repository is a passive backup mirror without workflows.
 MAIN validation input is retained for 90 days and named by exact source/run/attempt;
 tag jobs download only the verified immutable artifact ID. Neither successful
 PR/DEV builds nor stale/missing MAIN evidence authorize release. There is no

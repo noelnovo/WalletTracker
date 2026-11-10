@@ -22,7 +22,7 @@ encryption protocol. Screens remain protected against screenshots and recording.
 | Directory | Purpose |
 | --- | --- |
 | `app/` | Android application, JVM tests, and emulator-only UI/storage tests |
-| `.github/workflows/` | GitHub Actions job orchestration and permissions |
+| `.gitlab-ci.yml` | GitLab CI delivery: validation, security gates, and releases |
 | `scripts/ci/` | Source/API compatibility checks |
 | `scripts/build/` | Debug/production build and signing helpers |
 | `scripts/release/` | Verified APK publication and non-publishing signing checks |
@@ -50,81 +50,32 @@ data or substitute a different signing identity.
 
 ## CI and releases
 
-[WalletTracker validation](.github/workflows/validation.yml) runs on DEV, MAIN,
-and pull requests: source checks, automation tests, JVM tests, and debug/unsigned
-release builds. GitLab remains a passive backup with CI disabled.
+GitLab CI runs on DEV, MAIN, and merge requests: source checks, automation
+tests, JVM tests, the JaCoCo coverage report, and debug/unsigned release
+builds. The GitHub repository is a passive backup mirror without workflows.
 
 ### Security checks
 
-Pull requests into DEV and MAIN must pass the trusted pre-merge workflow before
-merging. It validates the exact head/base/merge candidate, builds in a separate
-credential-free hosted job, then scans the candidate with the trusted default-MAIN
-controller. The controller revision and the PR target base are checked independently.
-The credentialed job never executes PR scripts/actions/build tools. It downloads
-source independently from GitHub and treats SBOM/bytecode artifacts as bounded,
-checksum-verified data, rejecting links, traversal and unexpected paths. Scanner
-configuration and control scripts come from the trusted base, not the PR.
-
-The controller uploads the resolved CycloneDX SBOM, waits for Dependency-Track
-analysis, synchronizes this project's plugin settings from Vault, then runs SonarQube.
-The assigned **SonarQube quality gate** evaluates the Dependency-Track plugin's
-metrics: severity/fixable/policy thresholds are configured in SonarQube, not
-hard-coded in Python. A missing plugin metric or failed quality gate blocks CI.
-PR-controlled build jobs do not receive scanner credentials. A missing, failed,
-cancelled or skipped producer cannot yield a passing security status. A changed
-head/base/candidate invalidates the run. DEV and MAIN use different required
-statuses (`security/sonarqube-dtrack-dev` and `security/sonarqube-dtrack-main`)
-and strict up-to-date branch checks; a DEV result cannot authorize a MAIN merge.
-CI control paths have base-branch CODEOWNERS review protection. A separate
-review-only ruleset permits the repository owner to bypass self-review, while
-the required security checks remain enforced for administrators as well.
-Post-merge push validation remains a second check, not the merge gate. Both paths
-serialize access to the shared Community Edition Sonar/DT project using `queue: max`
-(not GitHub's single-pending default, which cancels waiting scans). This is snapshot
-analysis with exact analysis-ID verification, not edition-gated native PR decoration.
-MAIN release signing still requires its exact-commit successful push validation.
-
-GitHub OIDC obtains short-lived Vault tokens: `security-ci-android-pr` only for
-the trusted `pull_request_target` controller on DEV/MAIN, and `security-ci-android`
-only for the post-merge push validation workflow. The PR build job has no OIDC
-permission. Both readers' paths
-are restricted to these `downops/` KV-v2 records:
-
-| Record | Purpose |
-| --- | --- |
-| `services/dependency-track/clients/instance-005` | Android-only SBOM upload |
-| `services/dependency-track/sonarqube/instance-005` | Android-only read-only plugin key |
-| `services/sonarqube/clients/instance-005` | Project analysis token |
-| `services/sonarqube/project-settings/instance-005` | Dedicated project-settings token |
-
-Values are fetched at job time and sent through verified HTTPS or scanner
-environment variables, never token arguments or tracked files. Plugin settings
-are reconciled through the supported SonarQube API on each trusted run, so a
-Vault key update is applied without manually copying it into the UI. The settings
-identity administers only this project; SonarQube's mandatory default group also
-grants analysis/project creation, an explicitly accepted platform limitation.
-Its recovery password is operator-only and is not readable by CI. Dependency-Track
-portfolio ACLs restrict the uploader and separate plugin reader to this project.
+Pipelines on protected DEV/MAIN branches and exact version tags run the
+security-gates job: the built CycloneDX SBOM is uploaded to Dependency-Track,
+then SonarQube analyzes the candidate and the assigned quality gate evaluates
+the result. The gate owns severity/fixable/policy thresholds; a failed gate
+blocks publication. Merge requests never obtain delivery credentials.
 
 ### Production releases
 
-[WalletTracker production release](.github/workflows/android.yml) runs only on
-version tags. It waits for successful MAIN validation of the **exact tag commit**
-and reuses that run's immutable, checksum-bound unsigned APK. It does not repeat
-the build. PR/DEV results cannot substitute for MAIN evidence, and missing,
-failed, skipped, expired, or mismatched evidence blocks signing.
-
-A release requires a matching version and release notes, a reviewed merge into
-MAIN, and an exact protected `vX.Y.Z` tag. The production reviewer approves once
-before Vault-backed signing. Input checksums, source, version, and configuration
-are verified before Vault access and again by the signer; the separate
-least-privilege publication job verifies and publishes the signed APK with its
-ephemeral `GITHUB_TOKEN`. MAIN validates; the tag signs/publishes those validated
-bytes. Two differently named runs remain, but duplicate validation is removed.
+The release job runs only on protected `vX.Y.Z` tags and only after the
+security gates pass on the exact tag commit. It verifies the production
+backend is live, validates the previous release checksum, reads the
+production keystore from Vault at job time, signs the unsigned APK with
+`apksigner`, verifies the signer certificate against the pinned production
+identity, and publishes a GitLab release with the signed APK. The job is
+manual: the production reviewer approves by playing it. Never move an
+existing version tag or bypass production approval.
 
 Android releases do not deploy the backend or run database migrations. Confirm
 backend compatibility separately before releasing a client that needs new API
-features. Never move an existing version tag or bypass production approval.
+features.
 
 ## Documentation
 

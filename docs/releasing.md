@@ -1,10 +1,10 @@
 # WalletTracker production release — developer guide
 
-GitHub is the authoritative Android source, CI runner and APK download host.
-GitLab is a passive source/tag backup with CI disabled. The active workflow is
-[`validation.yml`](../.github/workflows/validation.yml) validates branches/PRs;
-[`android.yml`](../.github/workflows/android.yml) releases version tags. The
-release filename stays unchanged to preserve the existing Vault workflow trust.
+GitLab is the authoritative Android source, CI runner and APK download host.
+GitHub is a passive source/tag backup without workflows. The delivery is
+[`.gitlab-ci.yml`](../.gitlab-ci.yml): it validates branches/MRs, gates every
+protected ref through Dependency-Track and SonarQube, and releases protected
+version tags through the manual Vault-backed signing job.
 
 **One production approval:** approve before signing; publication of the verified
 artifact then runs automatically in a separate least-privilege job.

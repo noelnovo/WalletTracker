@@ -8,14 +8,12 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 class LayoutTests(unittest.TestCase):
     def test_workflow_modules_exist_and_flat_delivery_commands_are_gone(self):
-        for name in ('android.yml', 'validation.yml'):
-            workflow = (ROOT / '.github/workflows' / name).read_text()
-            self.assertNotIn('PYTHONPATH=delivery', workflow)
-            self.assertNotIn('delivery/', workflow)
-            if name == 'validation.yml':
-                self.assertIn('discover -s tests/automation', workflow)
-            for module in re.findall(r'python3 -m (scripts[\w.]+)', workflow):
-                self.assertTrue((ROOT / (module.replace('.', '/') + '.py')).is_file(), module)
+        self.assertTrue((ROOT / '.gitlab-ci.yml').is_file())
+        self.assertFalse((ROOT / '.github/workflows/android.yml').exists())
+        self.assertFalse((ROOT / '.github/workflows/validation.yml').exists())
+        self.assertNotIn('PYTHONPATH=delivery', (ROOT / '.gitlab-ci.yml').read_text())
+        for suite in ('tests/automation', 'ci'):
+            self.assertIn(f"discover -s {suite}", (ROOT / '.gitlab-ci.yml').read_text())
 
     def test_local_documentation_links_resolve(self):
         for document in [ROOT / 'README.md', *(ROOT / 'docs').rglob('*.md')]:

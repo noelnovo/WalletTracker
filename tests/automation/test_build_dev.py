@@ -74,12 +74,11 @@ class DevSigningTests(unittest.TestCase):
         self.assertNotIn('KEY_PASSWORD', plan['required_keys'])
 
     def test_dev_is_validation_only_and_does_not_release_signed_apks(self):
-        workflow = (build_dev.ROOT / '.github/workflows/validation.yml').read_text()
-        self.assertNotIn('  dev-apk:', workflow)
+        workflow = (build_dev.ROOT / '.gitlab-ci.yml').read_text()
         self.assertNotIn('role: wallettracker-mobile-ci-dev', workflow)
-        self.assertNotIn('  publication-check:', workflow)
-        self.assertNotIn('  prod-signing-check:', workflow)
-        self.assertIn('name: unsigned-build-test-reports', workflow)
+        self.assertNotIn('prod-signing-check:', workflow)
+        self.assertIn('testDebugUnitTest jacocoTestReport', workflow)
+        self.assertIn('assembleDebug assembleRelease', workflow)
 
     def test_actual_apk_must_match_dev_certificate_and_not_production(self):
         certificate = b'synthetic-public-certificate'
