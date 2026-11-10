@@ -1,7 +1,9 @@
 # GitLab-native delivery for the android client. GitLab is the CI owner:
 # validation, security gates, and the protected-tag signed release.
 # The GitHub repository is a passive backup mirror.
-stages: [checks, build, security, publish]
+# Tests and the release build run as separate jobs: the runner host is
+# memory-constrained, so their JVM peaks must not stack in one job.
+stages: [checks, test, build, security, publish]
 
 checks:
   stage: checks
@@ -11,8 +13,8 @@ checks:
     - python3 -m unittest discover -s tests/automation -p 'test_*.py'
     - python3 -m unittest discover -s ci -p 'test_*.py'
 
-jvm-tests-and-builds:
-  stage: build
+unit-tests:
+  stage: test
   image: eclipse-temurin:21-jdk
   variables:
     ANDROID_HOME: /opt/android-sdk
@@ -25,12 +27,31 @@ jvm-tests-and-builds:
     - if [ ! -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then mkdir -p "$ANDROID_HOME/cmdline-tools" && wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip && unzip -q commandlinetools-linux-11076708_latest.zip -d "$ANDROID_HOME/cmdline-tools" && mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest"; fi
     - yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
     - $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-36" "build-tools;36.0.0" > /dev/null
-    - sh gradlew --no-daemon --max-workers=2 '-Dorg.gradle.jvmargs=-Xmx1536m -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8' -Pkotlin.compiler.execution.strategy=in-process testDebugUnitTest jacocoTestReport assembleDebug assembleRelease cyclonedxBom
+    - sh gradlew --no-daemon --max-workers=2 '-Dorg.gradle.jvmargs=-Xmx1536m -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8' -Pkotlin.compiler.execution.strategy=in-process testDebugUnitTest jacocoTestReport
+  artifacts:
+    paths: [app/build/reports/jacoco/jacocoTestReport/jacocoTestReport.xml]
+    expire_in: 7 days
+
+release-build:
+  stage: build
+  image: eclipse-temurin:21-jdk
+  variables:
+    ANDROID_HOME: /opt/android-sdk
+    GRADLE_USER_HOME: .gradle
+  cache:
+    key: android-sdk-36
+    paths: [/opt/android-sdk]
+  needs: [checks, unit-tests]
+  script:
+    - apt-get update -qq && apt-get install -y -qq --no-install-recommends wget unzip > /dev/null
+    - if [ ! -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then mkdir -p "$ANDROID_HOME/cmdline-tools" && wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip && unzip -q commandlinetools-linux-11076708_latest.zip -d "$ANDROID_HOME/cmdline-tools" && mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest"; fi
+    - yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+    - $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-36" "build-tools;36.0.0" > /dev/null
+    - sh gradlew --no-daemon --max-workers=2 '-Dorg.gradle.jvmargs=-Xmx1536m -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8' -Pkotlin.compiler.execution.strategy=in-process assembleDebug assembleRelease cyclonedxBom
     - cp build/reports/cyclonedx/bom.json bom.json
   artifacts:
     paths:
       - bom.json
-      - app/build/reports/jacoco/jacocoTestReport/jacocoTestReport.xml
       - app/build/outputs/apk/release/app-release-unsigned.apk
       - app/build/generated/source/buildConfig/release/
     expire_in: 7 days
@@ -47,7 +68,9 @@ security-gates:
     DOCKER_TLS_CERTDIR: ""
   resource_group: wallettracker-android-security
   needs:
-    - job: jvm-tests-and-builds
+    - job: release-build
+      artifacts: true
+    - job: unit-tests
       artifacts: true
     - job: checks
   id_tokens:
@@ -76,7 +99,7 @@ release:
   resource_group: wallettracker-android-prod
   needs:
     - job: security-gates
-    - job: jvm-tests-and-builds
+    - job: release-build
       artifacts: true
   id_tokens:
     VAULT_ID_TOKEN:
