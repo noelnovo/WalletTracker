@@ -30,19 +30,19 @@ class RViewCategoriesAdapter(var list: MutableList<ExpenseCategory>) :
     }
 
     override fun getItemId(position: Int): Long {
-        return list[position].getId()
+        return list[position].id
     }
 
     @SuppressLint("DefaultLocale", "SetTextI18n")
     override fun onBindViewHolder(holder: ExpenseCategoryViewHolder, position: Int) {
 
         val category = list[position]
-        holder.categoryName.text = category.getName()
-        holder.categoryTotal.text = String.format("%.2f", category.getTotal()) + "€"
+        holder.categoryName.text = category.name
+        holder.categoryTotal.text = String.format("%.2f", category.total) + "€"
 
         holder.itemView.setOnClickListener {
             val bundle = Bundle()
-            bundle.putLong("catId", category.getId())
+            bundle.putLong("catId", category.id)
             holder.itemView.findNavController().navigate(R.id.nav_categoriesexpenses, bundle)
         }
     }

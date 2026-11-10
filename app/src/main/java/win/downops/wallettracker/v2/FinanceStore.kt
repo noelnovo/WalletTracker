@@ -86,40 +86,52 @@ class FinanceStore(context: Context, account: String) : SQLiteOpenHelper(context
                 val remote = result.getJSONObject("record")
                 // Older API-v2 servers discard extras and overwrite shares with an equal split.
                 // Fail before acknowledgement so the transaction retains the original outbox/data.
-                if (operation.getString("kind") == "bill" && !operation.optBoolean("deleted")) {
-                    val localPayload = operation.getJSONObject("payload")
-                    val extras = localPayload.optJSONArray("extras")
-                    if (extras != null && extras.length() > 0) {
-                        val remotePayload = remote.getJSONObject("payload")
-                        val remoteExtras = remotePayload.optJSONArray("extras")
-                        val shares = localPayload.getJSONArray("shares")
-                        val remoteShares = remotePayload.optJSONArray("shares")
-                        val sameExtras = remoteExtras != null && remoteExtras.length() == extras.length() &&
-                            (0 until extras.length()).all { index ->
-                                val expected = extras.getJSONObject(index); val actual = remoteExtras.getJSONObject(index)
-                                expected.optString("description") == actual.optString("description") &&
-                                    expected.getString("participant") == actual.optString("participant") &&
-                                    expected.getLong("amount_minor") == actual.optLong("amount_minor", -1)
-                            }
-                        val sameShares = remoteShares != null && remoteShares.length() == shares.length() &&
-                            (0 until shares.length()).all { index ->
-                                val expected = shares.getJSONObject(index); val actual = remoteShares.getJSONObject(index)
-                                expected.getString("name") == actual.optString("name") &&
-                                    expected.getLong("amount_minor") == actual.optLong("amount_minor", -1)
-                            }
-                        if (!sameExtras || !sameShares) throw ItemizedBillSyncUnavailable(id, remote.getInt("version"))
-                    }
-                }
+                assertItemizedSharesIntact(operation, remote)
                 val current = pendingFor(id)
                 if (current != null && current.getString("operation_id") != operation.getString("operation_id")) {
                     // A UI edit raced the request: keep it and rebase on our acknowledged write.
-                    val local = rows(true).first { it.getString("id") == id }.put("version", remote.getInt("version"))
-                    val remainingUndo = readableDatabase.rawQuery("SELECT not_before FROM records WHERE id=?", arrayOf(id)).use {
-                        if (it.moveToFirst()) (it.getLong(0) - System.currentTimeMillis()).coerceAtLeast(0) else 0
-                    }
-                    putPending(local, remainingUndo)
+                    rebasePending(id, remote)
                 } else putRemote(remote)
             }
+        }
+    }
+
+    private fun rebasePending(id: String, remote: JSONObject) {
+        val local = rows(true).first { it.getString("id") == id }.put("version", remote.getInt("version"))
+        val remainingUndo = readableDatabase.rawQuery("SELECT not_before FROM records WHERE id=?", arrayOf(id)).use {
+            if (it.moveToFirst()) (it.getLong(0) - System.currentTimeMillis()).coerceAtLeast(0) else 0
+        }
+        putPending(local, remainingUndo)
+    }
+
+    /** True when the remote bill kept this operation's extras and per-person shares. */
+    private fun itemizedSharesIntact(operation: JSONObject, remote: JSONObject): Boolean {
+        val localPayload = operation.getJSONObject("payload")
+        val extras = localPayload.optJSONArray("extras") ?: return true
+        if (extras.length() == 0) return true
+        val remotePayload = remote.getJSONObject("payload")
+        val remoteExtras = remotePayload.optJSONArray("extras")
+        val shares = localPayload.getJSONArray("shares")
+        val remoteShares = remotePayload.optJSONArray("shares")
+        val sameExtras = remoteExtras != null && remoteExtras.length() == extras.length() &&
+            (0 until extras.length()).all { index ->
+                val expected = extras.getJSONObject(index); val actual = remoteExtras.getJSONObject(index)
+                expected.optString("description") == actual.optString("description") &&
+                    expected.getString("participant") == actual.optString("participant") &&
+                    expected.getLong("amount_minor") == actual.optLong("amount_minor", -1)
+            }
+        val sameShares = remoteShares != null && remoteShares.length() == shares.length() &&
+            (0 until shares.length()).all { index ->
+                val expected = shares.getJSONObject(index); val actual = remoteShares.getJSONObject(index)
+                expected.getString("name") == actual.optString("name") &&
+                    expected.getLong("amount_minor") == actual.optLong("amount_minor", -1)
+            }
+        return sameExtras && sameShares
+    }
+
+    private fun assertItemizedSharesIntact(operation: JSONObject, remote: JSONObject) {
+        if (operation.getString("kind") == "bill" && !operation.optBoolean("deleted") && !itemizedSharesIntact(operation, remote)) {
+            throw ItemizedBillSyncUnavailable(operation.getString("id"), remote.getInt("version"))
         }
     }
 

@@ -79,7 +79,7 @@ class CreateCategoriesFragment : Fragment() {
         binding.createCategory.setOnClickListener {
             saveChanges()
         }
-        binding.inputName.setOnEditorActionListener { v, actionId, event ->
+        binding.inputName.setOnEditorActionListener { _, actionId, event ->
             if (actionId == EditorInfo.IME_ACTION_DONE ||
                 (event != null && event.keyCode == KeyEvent.KEYCODE_ENTER)) {
 
@@ -105,7 +105,7 @@ class CreateCategoriesFragment : Fragment() {
     }
 
     private fun checkValidation(category: ExpenseCategory): Boolean {
-        return category.getName().isNotEmpty()
+        return category.name.isNotEmpty()
     }
 
     private fun save() {

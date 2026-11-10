@@ -13,7 +13,7 @@ def main():
     tag = validate_check_identity(env)
     sha = env['GITHUB_SHA']
     job = env.get('GITHUB_RUN_ID', '')
-    if not re.fullmatch('[1-9][0-9]*', job):
+    if not re.fullmatch(r'[1-9]\d*', job):
         raise RuntimeError('A verified GitHub Actions run identity is required')
     token = publication_token(env)
     if tag_commit(tag, token) != sha:

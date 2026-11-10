@@ -9,7 +9,7 @@ FILES = {'app-release-unsigned.apk', 'BuildConfig.java', 'validation-receipt.jso
 
 
 def positive_id(value):
-    if not re.fullmatch(r'[1-9][0-9]*', str(value)) or isinstance(value, bool):
+    if not re.fullmatch(r'[1-9]\d*', str(value)) or isinstance(value, bool):
         raise RuntimeError('A verified positive Actions identity is required')
     return int(value)
 

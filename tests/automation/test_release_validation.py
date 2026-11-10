@@ -34,8 +34,9 @@ class ReleaseEvidenceTests(unittest.TestCase):
                 evidence['jobs'] = [job for job in evidence['jobs'] if job['name'] != 'security']
             else:
                 evidence['jobs'][-1]['conclusion'] = state
+            current_run = run()
             with self.subTest(state=state), patch.object(gate, 'api', return_value=evidence), self.assertRaises(RuntimeError):
-                gate.verify_completed_run(run(), 'synthetic-token')
+                gate.verify_completed_run(current_run, 'synthetic-token')
     def test_pr_dev_wrong_workflow_and_foreign_repository_cannot_supply_evidence(self):
         self.assertTrue(gate.trusted_run(run(), SHA))
         for change in [{'event': 'pull_request'}, {'head_branch': 'dev'}, {'head_sha': 'b' * 40},
@@ -54,16 +55,18 @@ class ReleaseEvidenceTests(unittest.TestCase):
     def test_failed_cancelled_skipped_or_pending_main_run_cannot_authorize_release(self):
         for change in [{'conclusion': 'failure'}, {'conclusion': 'cancelled'}, {'conclusion': 'skipped'},
                        {'status': 'in_progress', 'conclusion': None}]:
+            current_run = dict(run(), **change)
             with self.subTest(change=change), patch.object(gate, 'api') as api, self.assertRaises(RuntimeError):
-                gate.verify_completed_run(dict(run(), **change), 'synthetic-token')
+                gate.verify_completed_run(current_run, 'synthetic-token')
             api.assert_not_called()
 
     def test_skipped_missing_duplicate_or_failed_required_job_is_rejected(self):
         for changed in [[], [jobs()['jobs'][0]], jobs()['jobs'] + [jobs()['jobs'][0]],
                         [dict(job, conclusion='skipped') for job in jobs()['jobs']],
                         [dict(job, status='in_progress') for job in jobs()['jobs']]]:
+            current_run = run()
             with self.subTest(jobs=changed), patch.object(gate, 'api', return_value={'jobs': changed}), self.assertRaises(RuntimeError):
-                gate.verify_completed_run(run(), 'synthetic-token')
+                gate.verify_completed_run(current_run, 'synthetic-token')
 
     def test_missing_expired_wrong_attempt_wrong_source_and_digestless_artifacts_fail_closed(self):
         bad = [[], [artifact(), artifact()]]
@@ -74,8 +77,9 @@ class ReleaseEvidenceTests(unittest.TestCase):
             value = copy.deepcopy(artifact()); value['workflow_run'][key] = 'wrong'
             bad.append([value])
         for artifacts in bad:
+            current_run = run()
             with self.subTest(artifacts=artifacts), patch.object(gate, 'api', side_effect=[jobs(), {'artifacts': artifacts}]), self.assertRaises(RuntimeError):
-                gate.verify_completed_run(run(), 'synthetic-token')
+                gate.verify_completed_run(current_run, 'synthetic-token')
 
     def test_tag_waits_for_main_instead_of_starting_a_duplicate_build(self):
         pending = dict(run(), status='in_progress', conclusion=None)

@@ -23,6 +23,6 @@ class DatePickerFragment : DialogFragment(), DatePickerDialog.OnDateSetListener 
 
     @RequiresApi(Build.VERSION_CODES.O)
     override fun onDateSet(view: DatePicker, year: Int, month: Int, day: Int) {
-
+        // Intentionally empty: this fragment only shows the picker; callers handle the picked date elsewhere
     }
 }

@@ -22,14 +22,14 @@ class ComboCategoriasAdapter(private val context: Context, private val items: Li
         val item = getItem(position)
 
         val text = view.findViewById<TextView>(R.id.spinner_text)
-        text.text = item.getName()
+        text.text = item.name
 
         return view
     }
     fun getById(catId: Long): Int{
         var position = 0
         for (item in items){
-            if(item.getId() == catId)
+            if(item.id == catId)
                 return position
             position ++
         }

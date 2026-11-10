@@ -46,7 +46,7 @@ class ExpenseCategoryHttpService @Inject constructor(
 
     override suspend fun create(category: ExpenseCategory): AppResult<ExpenseCategory?> {
         return safeCipheredApiCall(
-            call = { ApiClient.expenseCategory.createExpenseCategories("Bearer ${getToken()}", getCipheredText(), encryptData(CreateExpenseCategoryRequest(category.getName())) ?: throw Exception("Auth error")) },
+            call = { ApiClient.expenseCategory.createExpenseCategories("Bearer ${getToken()}", getCipheredText(), encryptData(CreateExpenseCategoryRequest(category.name)) ?: throw Exception("Auth error")) },
             parser = { json ->
                 val parsed = GsonBuilder().create()
                     .fromJson(json, object : com.google.gson.reflect.TypeToken<BaseResponse<ExpenseCategory?>>() {}.type) as BaseResponse<ExpenseCategory?>
@@ -58,7 +58,7 @@ class ExpenseCategoryHttpService @Inject constructor(
 
     override suspend fun edit(category: ExpenseCategory): AppResult<ExpenseCategory?> {
         return safeCipheredApiCall(
-            call = { ApiClient.expenseCategory.editName("Bearer ${getToken()}", getCipheredText(), encryptData(EditExpenseCategoryRequest(category.getId(), category.getName())) ?: throw Exception("Auth error")) },
+            call = { ApiClient.expenseCategory.editName("Bearer ${getToken()}", getCipheredText(), encryptData(EditExpenseCategoryRequest(category.id, category.name)) ?: throw Exception("Auth error")) },
             parser = { json ->
                 val parsed = GsonBuilder().create()
                     .fromJson(json, object : com.google.gson.reflect.TypeToken<BaseResponse<ExpenseCategory?>>() {}.type) as BaseResponse<ExpenseCategory?>

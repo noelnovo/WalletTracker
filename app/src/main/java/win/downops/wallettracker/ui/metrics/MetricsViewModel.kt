@@ -97,7 +97,7 @@ class MetricsViewModel @Inject constructor(
         }
 
         val categories = (categoriesResult as AppResult.Success).data
-        categoryNameMap = categories.associate { it.getId() to it.getName() }
+        categoryNameMap = categories.associate { it.id to it.name }
 
         val seasonsResult = seasonRepo.getAll()
         if (seasonsResult is AppResult.Success) {
@@ -106,7 +106,7 @@ class MetricsViewModel @Inject constructor(
 
         val expensePairs = categories.map { cat ->
             async {
-                val catId = cat.getId()
+                val catId = cat.id
                 when (val result = expenseRepo.getByCatId(catId)) {
                     is AppResult.Success -> catId to result.data
                     is AppResult.Error -> catId to emptyList<Expense>()
@@ -117,21 +117,21 @@ class MetricsViewModel @Inject constructor(
         allExpenses = expensePairs.flatMap { it.second }
 
         val catOptions = categories
-            .filter { cat -> expensePairs.any { it.first == cat.getId() && it.second.isNotEmpty() } }
-            .map { CategoryOption(it.getId(), it.getName()) }
+            .filter { cat -> expensePairs.any { it.first == cat.id && it.second.isNotEmpty() } }
+            .map { CategoryOption(it.id, it.name) }
         _categoryOptions.postValue(catOptions)
 
         val expenseMonths = allExpenses
             .mapNotNull { try { monthFormat.format(it.getDate()) } catch (e: Exception) { null } }
         
-        val seasonMonths = allSeasons.map { String.format(Locale.getDefault(), "%04d-%02d", it.getYear(), it.getMonth()) }
+        val seasonMonths = allSeasons.map { String.format(Locale.getDefault(), "%04d-%02d", it.year, it.month) }
 
         val monthOpts = (expenseMonths + seasonMonths)
             .distinct()
             .sortedDescending()
             .map { key ->
                 val cal = Calendar.getInstance()
-                try { cal.time = monthFormat.parse(key)!! } catch (e: Exception) {}
+                try { cal.time = monthFormat.parse(key)!! } catch (e: Exception) { /* keep the calendar's current time when parsing fails */ }
                 MonthOption(key, labelFormat.format(cal.time))
             }
         _monthOptions.postValue(monthOpts)
@@ -148,38 +148,15 @@ class MetricsViewModel @Inject constructor(
 
     private fun applyFilters() {
         viewModelScope.launch {
-            var filtered = allExpenses
-            selectedCategoryId?.let { catId ->
-                filtered = filtered.filter { it.getCategoryId() == catId }
-            }
-            selectedMonthKey?.let { monthKey ->
-                filtered = filtered.filter { expense ->
-                    try { monthFormat.format(expense.getDate()) == monthKey } catch (e: Exception) { false }
-                }
-            }
+            val filtered = applySelectionFilters()
 
             val total = filtered.sumOf { try { it.getPrice() } catch (e: Exception) { 0.0 } }
             val count = filtered.size
             val average = if (count > 0) total / count else 0.0
 
-            val categoryMetrics = filtered
-                .groupBy { it.getCategoryId() }
-                .map { (catId, expenses) ->
-                    val catTotal = expenses.sumOf { try { it.getPrice() } catch (e: Exception) { 0.0 } }
-                    CategoryMetric(
-                        name = categoryNameMap[catId] ?: "Unknown",
-                        total = catTotal,
-                        percentage = if (total > 0) (catTotal / total) * 100 else 0.0
-                    )
-                }
-                .sortedByDescending { it.total }
-
+            val categoryMetrics = buildCategoryMetrics(filtered, total)
             val monthMetrics = buildMonthMetrics(filtered)
-
-            var comparison: ComparisonMetric? = null
-            if (selectedMonthKey != null && selectedCategoryId == null) {
-                comparison = calculateComparison(selectedMonthKey!!, total)
-            }
+            val comparison = buildComparison(total)
 
             if (filtered.isEmpty() && comparison == null) {
                 _metricsResult.postValue(AppResult.Error("No data for the selected filters", isControlled = true))
@@ -192,19 +169,54 @@ class MetricsViewModel @Inject constructor(
         }
     }
 
+    private fun applySelectionFilters(): List<Expense> {
+        var filtered = allExpenses
+        selectedCategoryId?.let { catId ->
+            filtered = filtered.filter { it.getCategoryId() == catId }
+        }
+        selectedMonthKey?.let { monthKey ->
+            filtered = filtered.filter { expense ->
+                try { monthFormat.format(expense.getDate()) == monthKey } catch (e: Exception) { false }
+            }
+        }
+        return filtered
+    }
+
+    private fun buildCategoryMetrics(expenses: List<Expense>, total: Double): List<CategoryMetric> {
+        return expenses
+            .groupBy { it.getCategoryId() }
+            .map { (catId, catExpenses) ->
+                val catTotal = catExpenses.sumOf { try { it.getPrice() } catch (e: Exception) { 0.0 } }
+                CategoryMetric(
+                    name = categoryNameMap[catId] ?: "Unknown",
+                    total = catTotal,
+                    percentage = if (total > 0) (catTotal / total) * 100 else 0.0
+                )
+            }
+            .sortedByDescending { it.total }
+    }
+
+    private suspend fun buildComparison(expenseTotal: Double): ComparisonMetric? {
+        var comparison: ComparisonMetric? = null
+        if (selectedMonthKey != null && selectedCategoryId == null) {
+            comparison = calculateComparison(selectedMonthKey!!, expenseTotal)
+        }
+        return comparison
+    }
+
     private suspend fun calculateComparison(monthKey: String, expenseTotal: Double): ComparisonMetric? {
         val parts = monthKey.split("-")
         if (parts.size != 2) return null
         val year = parts[0].toIntOrNull() ?: return null
         val month = parts[1].toIntOrNull() ?: return null
 
-        val season = allSeasons.find { it.getYear() == year && it.getMonth() == month } ?: return null
-        val result = importeRepo.getBySeasonId(season.getId())
+        val season = allSeasons.find { it.year == year && it.month == month } ?: return null
+        val result = importeRepo.getBySeasonId(season.id)
         if (result !is AppResult.Success || result.data.isEmpty()) return null
 
         val imports = result.data
-        val importTotalIncome = imports.filter { it.getAmount() > 0 }.sumOf { it.getAmount() }
-        val importTotalExpense = imports.filter { it.getAmount() < 0 }.sumOf { Math.abs(it.getAmount()) }
+        val importTotalIncome = imports.filter { it.amount > 0 }.sumOf { it.amount }
+        val importTotalExpense = imports.filter { it.amount < 0 }.sumOf { Math.abs(it.amount) }
 
         val diff = Math.abs(importTotalExpense - expenseTotal)
         val matchPercentage = if (importTotalExpense > 0) {
@@ -226,7 +238,7 @@ class MetricsViewModel @Inject constructor(
             .sortedBy { it.key }
             .map { (key, monthTotal) ->
                 val cal = Calendar.getInstance()
-                try { cal.time = monthFormat.parse(key)!! } catch (e: Exception) {}
+                try { cal.time = monthFormat.parse(key)!! } catch (e: Exception) { /* keep the calendar's current time when parsing fails */ }
                 MonthMetric(
                     label = labelFormat.format(cal.time),
                     total = monthTotal,

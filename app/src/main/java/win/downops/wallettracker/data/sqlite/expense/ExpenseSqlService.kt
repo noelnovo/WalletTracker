@@ -22,6 +22,9 @@ import java.text.SimpleDateFormat
 import kotlin.Long
 import kotlin.Throws
 
+private const val DATABASE_NOT_AVAILABLE = "Database not available"
+private const val ID_EQUALS = "id = ?"
+
 @RequiresApi(Build.VERSION_CODES.O)
 class ExpenseSqlService @Inject constructor(
     @ApplicationContext context: Context?
@@ -51,12 +54,12 @@ class ExpenseSqlService @Inject constructor(
                 put("price", expense.getPrice())
                 put("expenseDate", SimpleDateFormat("yyyy-MM-dd").format(expense.getDate()))
                 put("category", expense.getCategoryId())
-                put("description", expense.getDescription())
+                put("description", expense.description)
                 if (seasonId != null) put("seasonId", seasonId) else putNull("seasonId")
             }
 
             val rowId = database?.insert("Expense", null, values)
-                ?: return@withContext AppResult.Error("Database not available", isControlled = true)
+                ?: return@withContext AppResult.Error(DATABASE_NOT_AVAILABLE, isControlled = true)
 
             if (rowId == -1L)
                 return@withContext AppResult.Error("Failed to create expense", isControlled = true)
@@ -77,13 +80,13 @@ class ExpenseSqlService @Inject constructor(
             val values = ContentValues().apply {
                 put("price", expense.getPrice())
                 put("category", expense.getCategoryId())
-                put("description", expense.getDescription())
+                put("description", expense.description)
                 put("expenseDate", SimpleDateFormat("yyyy-MM-dd").format(expense.getDate()))
                 if (seasonId != null) put("seasonId", seasonId) else putNull("seasonId")
             }
 
-            val rowsAffected = database?.update("Expense", values, "id = ?", arrayOf(expense.getId().toString()))
-                ?: return@withContext AppResult.Error("Database not available", isControlled = true)
+            val rowsAffected = database?.update("Expense", values, ID_EQUALS, arrayOf(expense.id.toString()))
+                ?: return@withContext AppResult.Error(DATABASE_NOT_AVAILABLE, isControlled = true)
 
             if (rowsAffected == 0)
                 return@withContext AppResult.Error("Failed to update expense", isControlled = true)
@@ -99,8 +102,8 @@ class ExpenseSqlService @Inject constructor(
 
     override suspend fun deleteById(expenseId: Long): AppResult<Unit> = withContext(Dispatchers.IO) {
         try {
-            val rowsDeleted = database?.delete("Expense", "id = ?", arrayOf(expenseId.toString()))
-                ?: return@withContext AppResult.Error("Database not available", isControlled = true)
+            val rowsDeleted = database?.delete("Expense", ID_EQUALS, arrayOf(expenseId.toString()))
+                ?: return@withContext AppResult.Error(DATABASE_NOT_AVAILABLE, isControlled = true)
 
             if (rowsDeleted == 0)
                 return@withContext AppResult.Error("Failed to delete expense", isControlled = true)
@@ -117,7 +120,7 @@ class ExpenseSqlService @Inject constructor(
     override suspend fun deleteAll(): AppResult<Unit> = withContext(Dispatchers.IO) {
         try {
             val rowsDeleted = database?.delete("Expense", null, null)
-                ?: return@withContext AppResult.Error("Database not available", isControlled = true)
+                ?: return@withContext AppResult.Error(DATABASE_NOT_AVAILABLE, isControlled = true)
 
             if (rowsDeleted == 0)
                 return@withContext AppResult.Error("No expenses found to delete", isControlled = true)
@@ -137,7 +140,7 @@ class ExpenseSqlService @Inject constructor(
             val cursor = database?.query(
                 "Expense", null, "seasonId = ?", arrayOf(seasonId.toString()),
                 null, null, "expenseDate DESC, id DESC"
-            ) ?: return@withContext AppResult.Error("Database not available", isControlled = true)
+            ) ?: return@withContext AppResult.Error(DATABASE_NOT_AVAILABLE, isControlled = true)
             cursor.use { while (it.moveToNext()) expenseList.add(mapCursor(it)) }
             AppResult.Success("Expenses fetched successfully", expenseList)
         } catch (e: Exception) {
@@ -156,7 +159,7 @@ class ExpenseSqlService @Inject constructor(
                 null,
                 null,
                 "expenseDate DESC, id DESC"
-            ) ?: return@withContext AppResult.Error("Database not available", isControlled = true)
+            ) ?: return@withContext AppResult.Error(DATABASE_NOT_AVAILABLE, isControlled = true)
 
             cursor.use {
                 while (it.moveToNext()) {
@@ -181,24 +184,19 @@ class ExpenseSqlService @Inject constructor(
             val cursor = database?.query(
                 "Expense",
                 null,
-                "id = ?",
+                ID_EQUALS,
                 arrayOf(expenseId.toString()),
                 null,
                 null,
                 null
-            ) ?: return@withContext AppResult.Error("Database not available", isControlled = true)
+            ) ?: return@withContext AppResult.Error(DATABASE_NOT_AVAILABLE, isControlled = true)
 
-            var expense: Expense? = null
-            cursor.use {
-                if (it.moveToFirst()) {
-                    expense = mapCursor(it)
-                }
-            }
+            val expense = cursor.use { if (it.moveToFirst()) mapCursor(it) else null }
 
             if (expense == null)
                 return@withContext AppResult.Error("Expense not found with ID: $expenseId", isControlled = true)
 
-            AppResult.Success("Expense fetched successfully", expense!!)
+            AppResult.Success("Expense fetched successfully", expense)
         } catch (e: Exception) {
             AppResult.Error(
                 e.message ?: "Unexpected error fetching expense",

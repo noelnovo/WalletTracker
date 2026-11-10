@@ -1,10 +1,11 @@
 package win.downops.wallettracker.data.api.communication.responses
 
+import com.google.gson.annotations.SerializedName
 import win.downops.wallettracker.data.api.communication.requests.CipheredRequest
 
 data class CipheredResponse(
     val signature: String?,
-    val encrypted_data: CipheredRequest?
+    @SerializedName("encrypted_data") val encryptedData: CipheredRequest?
 )
 
 data class BaseResponse<T>(

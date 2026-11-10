@@ -16,4 +16,4 @@ jobs:
       id-token: write
     # Literal shared control, not scripts/configuration supplied by the PR.
     # Required security/sonarqube-dtrack-{dev,main} statuses stay unchanged.
-    uses: noelnovo/.github/.github/workflows/dependency-track-scan.yml@55425668e1d0aaac5a60c7eec35b91a99d483b79
+    uses: noelnovo/.github/.github/workflows/dependency-track-scan.yml@cc4ce6779f6f4ee751f1f30b2a319b08adb20830

@@ -79,7 +79,7 @@ class ReleaseApprovalTests(unittest.TestCase):
         self.assertNotIn('continue-on-error', validation)
         self.assertIn('python3 -m scripts.ci.verify_contract', validation)
         self.assertIn('discover -s tests/automation', validation)
-        self.assertIn('testDebugUnitTest assembleDebug assembleRelease', validation)
+        self.assertIn('testDebugUnitTest jacocoTestReport assembleDebug assembleRelease', validation)
         self.assertIn("github.event_name == 'push' && github.ref == 'refs/heads/main'", validation)
 
 

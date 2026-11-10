@@ -18,6 +18,8 @@ import java.sql.Date
 import java.sql.SQLException
 import java.text.SimpleDateFormat
 
+private const val DATABASE_NOT_AVAILABLE = "Database not available"
+
 class ImporteSqlService @Inject constructor(
     @ApplicationContext context: Context?
 ) : Closeable, ImporteRepository {
@@ -44,7 +46,7 @@ class ImporteSqlService @Inject constructor(
             val cursor = database?.query(
                 "Importe", null, "seasonId = ?", arrayOf(seasonId.toString()),
                 null, null, "importeDate DESC, id DESC"
-            ) ?: return@withContext AppResult.Error("Database not available", isControlled = true)
+            ) ?: return@withContext AppResult.Error(DATABASE_NOT_AVAILABLE, isControlled = true)
             cursor.use { while (it.moveToNext()) list.add(mapCursor(it)) }
             AppResult.Success("Importes fetched successfully", list)
         } catch (e: Exception) {
@@ -55,11 +57,10 @@ class ImporteSqlService @Inject constructor(
     override suspend fun getById(importeId: Long): AppResult<Importe?> = withContext(Dispatchers.IO) {
         try {
             val cursor = database?.query("Importe", null, "id = ?", arrayOf(importeId.toString()), null, null, null)
-                ?: return@withContext AppResult.Error("Database not available", isControlled = true)
-            var importe: Importe? = null
-            cursor.use { if (it.moveToFirst()) importe = mapCursor(it) }
+                ?: return@withContext AppResult.Error(DATABASE_NOT_AVAILABLE, isControlled = true)
+            val importe = cursor.use { if (it.moveToFirst()) mapCursor(it) else null }
             if (importe == null) return@withContext AppResult.Error("Importe not found", isControlled = true)
-            AppResult.Success("Importe fetched successfully", importe!!)
+            AppResult.Success("Importe fetched successfully", importe)
         } catch (e: Exception) {
             AppResult.Error(e.message ?: "Unexpected error fetching importe", isControlled = false, e.stackTrace.joinToString("\n"))
         }
@@ -69,14 +70,14 @@ class ImporteSqlService @Inject constructor(
     override suspend fun create(importe: Importe): AppResult<Importe?> = withContext(Dispatchers.IO) {
         try {
             val values = ContentValues().apply {
-                put("concept", importe.getConcept())
+                put("concept", importe.concept)
                 put("importeDate", SimpleDateFormat("yyyy-MM-dd").format(importe.getDate()))
-                put("amount", importe.getAmount())
-                put("balanceAfter", importe.getBalanceAfter())
-                put("seasonId", importe.getSeasonId())
+                put("amount", importe.amount)
+                put("balanceAfter", importe.balanceAfter)
+                put("seasonId", importe.seasonId)
             }
             val rowId = database?.insert("Importe", null, values)
-                ?: return@withContext AppResult.Error("Database not available", isControlled = true)
+                ?: return@withContext AppResult.Error(DATABASE_NOT_AVAILABLE, isControlled = true)
             if (rowId == -1L) return@withContext AppResult.Error("Failed to create importe", isControlled = true)
             AppResult.Success("Importe created successfully", importe)
         } catch (e: Exception) {
@@ -87,7 +88,7 @@ class ImporteSqlService @Inject constructor(
     override suspend fun deleteById(importeId: Long): AppResult<Unit> = withContext(Dispatchers.IO) {
         try {
             val rowsDeleted = database?.delete("Importe", "id = ?", arrayOf(importeId.toString()))
-                ?: return@withContext AppResult.Error("Database not available", isControlled = true)
+                ?: return@withContext AppResult.Error(DATABASE_NOT_AVAILABLE, isControlled = true)
             if (rowsDeleted == 0) return@withContext AppResult.Error("Importe not found", isControlled = true)
             AppResult.Success("Importe deleted successfully", Unit)
         } catch (e: Exception) {
@@ -98,7 +99,7 @@ class ImporteSqlService @Inject constructor(
     override suspend fun deleteBySeasonId(seasonId: Long): AppResult<Unit> = withContext(Dispatchers.IO) {
         try {
             database?.delete("Importe", "seasonId = ?", arrayOf(seasonId.toString()))
-                ?: return@withContext AppResult.Error("Database not available", isControlled = true)
+                ?: return@withContext AppResult.Error(DATABASE_NOT_AVAILABLE, isControlled = true)
             AppResult.Success("Importes deleted successfully", Unit)
         } catch (e: Exception) {
             AppResult.Error(e.message ?: "Unexpected error deleting importes", isControlled = false, e.stackTrace.joinToString("\n"))

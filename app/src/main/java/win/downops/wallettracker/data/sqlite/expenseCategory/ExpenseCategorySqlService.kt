@@ -19,6 +19,9 @@ import win.downops.wallettracker.data.ExpenseCategoryRepository
 import java.io.Closeable
 import java.sql.SQLException
 
+private const val DATABASE_NOT_AVAILABLE = "Database not available"
+private const val ID_EQUALS = "id = ?"
+
 class ExpenseCategorySqlService @Inject constructor(
     @ApplicationContext context: Context?)
     : Closeable,
@@ -58,7 +61,7 @@ class ExpenseCategorySqlService @Inject constructor(
             """
 
             val cursor = database?.rawQuery(query, null)
-                ?: return@withContext AppResult.Error("Database not available", isControlled = true)
+                ?: return@withContext AppResult.Error(DATABASE_NOT_AVAILABLE, isControlled = true)
 
             cursor.use {
                 while (it.moveToNext()) {
@@ -81,12 +84,12 @@ class ExpenseCategorySqlService @Inject constructor(
             val cursor = database?.query(
                 "ExpenseCategory",
                 null,
-                "id = ?",
+                ID_EQUALS,
                 arrayOf(catId.toString()),
                 null,
                 null,
                 null
-            ) ?: return@withContext AppResult.Error("Database not available", isControlled = true)
+            ) ?: return@withContext AppResult.Error(DATABASE_NOT_AVAILABLE, isControlled = true)
 
             cursor.use {
                 if (it.moveToFirst()) {
@@ -107,11 +110,11 @@ class ExpenseCategorySqlService @Inject constructor(
     override suspend fun create(category: ExpenseCategory): AppResult<ExpenseCategory?> = withContext(Dispatchers.IO) {
         return@withContext try {
             val values = ContentValues().apply {
-                put("name", category.getName())
+                put("name", category.name)
             }
 
             val rowId = database?.insert("ExpenseCategory", null, values)
-                ?: return@withContext AppResult.Error("Database not available", isControlled = true)
+                ?: return@withContext AppResult.Error(DATABASE_NOT_AVAILABLE, isControlled = true)
 
             if (rowId == -1L)
                 return@withContext AppResult.Error("Failed to create expense category", isControlled = true)
@@ -128,16 +131,16 @@ class ExpenseCategorySqlService @Inject constructor(
     override suspend fun edit(category: ExpenseCategory): AppResult<ExpenseCategory?> = withContext(Dispatchers.IO) {
         return@withContext try {
             val values = ContentValues().apply {
-                put("name", category.getName())
+                put("name", category.name)
                 put("sortOrder", category.getOrder())
             }
 
             val rowsAffected = database?.update(
                 "ExpenseCategory",
                 values,
-                "id = ?",
-                arrayOf(category.getId().toString())
-            ) ?: return@withContext AppResult.Error("Database not available", isControlled = true)
+                ID_EQUALS,
+                arrayOf(category.id.toString())
+            ) ?: return@withContext AppResult.Error(DATABASE_NOT_AVAILABLE, isControlled = true)
 
             if (rowsAffected <= 0)
                 return@withContext AppResult.Error("Failed to update category", isControlled = true)
@@ -155,9 +158,9 @@ class ExpenseCategorySqlService @Inject constructor(
         return@withContext try {
             val rowsDeleted = database?.delete(
                 "ExpenseCategory",
-                "id = ?",
+                ID_EQUALS,
                 arrayOf(catId.toString())
-            ) ?: return@withContext AppResult.Error("Database not available", isControlled = true)
+            ) ?: return@withContext AppResult.Error(DATABASE_NOT_AVAILABLE, isControlled = true)
 
             if (rowsDeleted <= 0)
                 return@withContext AppResult.Error("Failed to delete category", isControlled = true)

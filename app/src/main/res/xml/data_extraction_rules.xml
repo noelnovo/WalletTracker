@@ -10,10 +10,6 @@
         <exclude domain="sharedpref" path="." />
         <exclude domain="file" path="." />
         <exclude domain="external" path="." />
-        <!-- TODO: Use <include> and <exclude> to control what is backed up.
-        <include .../>
-        <exclude .../>
-        -->
     </cloud-backup>
     <device-transfer>
         <exclude domain="root" path="." />

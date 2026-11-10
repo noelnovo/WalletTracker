@@ -15,14 +15,44 @@ REPOSITORY = 'noelnovo/WalletTracker'
 API = 'https://api.github.com/repos/' + REPOSITORY
 
 
-def github(path, token, data=None, method=None, binary=None, content_type=None):
+def github_request(path, token, data, method, binary, content_type):
     url = path if path.startswith('https://uploads.github.com/') else API + path
     headers = {'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.github+json',
                'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'WalletTracker-GitHub-Actions-Release'}
-    body = binary if binary is not None else (json.dumps(data).encode() if data is not None else None)
+    body = binary
+    if body is None and data is not None:
+        body = json.dumps(data).encode()
     if body is not None:
         headers['Content-Type'] = content_type or 'application/json'
-    request = urllib.request.Request(url, data=body, headers=headers, method=method)
+    return urllib.request.Request(url, data=body, headers=headers, method=method)
+
+
+def github_error_category(message):
+    if 'resource not accessible by integration' in message:
+        return 'integration-permission'
+    if 'workflow' in message:
+        return 'workflow-permission'
+    if 'protected' in message or 'ruleset' in message:
+        return 'protected-ref'
+    if 'rate limit' in message:
+        return 'rate-limit'
+    return 'unclassified'
+
+
+def github_rejection_message(error):
+    try:
+        message = str(json.loads(error.read(8192)).get('message', '')).lower()
+    except (ValueError, AttributeError):
+        message = ''
+    request_id = error.headers.get('X-GitHub-Request-Id', '') if error.headers else ''
+    if not re.fullmatch('[A-Za-z0-9:-]{1,128}', request_id):
+        request_id = 'unavailable'
+    return ('GitHub release request rejected (HTTP ' + str(error.code) + '; category='
+            + github_error_category(message) + '; request=' + request_id + '); response withheld')
+
+
+def github(path, token, data=None, method=None, binary=None, content_type=None):
+    request = github_request(path, token, data, method, binary, content_type)
     try:
         with urllib.request.build_opener(NoRedirect()).open(request, timeout=120) as response:
             if response.status == 204:
@@ -31,19 +61,7 @@ def github(path, token, data=None, method=None, binary=None, content_type=None):
     except urllib.error.HTTPError as error:
         if error.code == 404 and method is None and data is None and binary is None:
             return None
-        try:
-            message = str(json.loads(error.read(8192)).get('message', '')).lower()
-        except (ValueError, UnicodeError, AttributeError):
-            message = ''
-        category = ('integration-permission' if 'resource not accessible by integration' in message else
-                    'workflow-permission' if 'workflow' in message else
-                    'protected-ref' if 'protected' in message or 'ruleset' in message else
-                    'rate-limit' if 'rate limit' in message else 'unclassified')
-        request_id = error.headers.get('X-GitHub-Request-Id', '') if error.headers else ''
-        if not re.fullmatch('[A-Za-z0-9:-]{1,128}', request_id):
-            request_id = 'unavailable'
-        raise RuntimeError('GitHub release request rejected (HTTP ' + str(error.code)
-                           + '; category=' + category + '; request=' + request_id + '); response withheld') from None
+        raise RuntimeError(github_rejection_message(error)) from None
 
 
 def tag_commit(tag, token):

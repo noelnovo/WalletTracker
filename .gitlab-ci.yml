@@ -1,0 +1,34 @@
+# GitLab fallback validation for the Android client. GitHub Actions remains
+# the release gate; this keeps the same checks running when GitHub cannot.
+stages: [checks, build]
+
+checks:
+  stage: checks
+  image: python:3.13-alpine
+  script:
+    - python3 -m scripts.ci.verify_contract
+    - python3 -m unittest discover -s tests/automation -p 'test_*.py'
+    - python3 -m unittest discover -s ci -p 'test_*.py'
+
+jvm-tests-and-builds:
+  stage: build
+  image: eclipse-temurin:21-jdk
+  variables:
+    ANDROID_HOME: /opt/android-sdk
+    GRADLE_USER_HOME: .gradle
+  cache:
+    key: android-sdk-36
+    paths: [/opt/android-sdk]
+  script:
+    - apt-get update -qq && apt-get install -y -qq --no-install-recommends wget unzip > /dev/null
+    - if [ ! -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
+        mkdir -p "$ANDROID_HOME/cmdline-tools" &&
+        wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip &&
+        unzip -q commandlinetools-linux-11076708_latest.zip -d "$ANDROID_HOME/cmdline-tools" &&
+        mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest"; fi
+    - yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+    - "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.0.0' > /dev/null
+    - sh gradlew --no-daemon --max-workers=2 testDebugUnitTest jacocoTestReport assembleDebug assembleRelease cyclonedxBom
+  artifacts:
+    paths: [app/build/reports/jacoco/jacocoTestReport/jacocoTestReport.xml, build/reports/cyclonedx/bom.json]
+    expire_in: 7 days

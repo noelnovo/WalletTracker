@@ -25,9 +25,9 @@ class RViewImportesAdapter(
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
         val importe = items[position]
-        holder.binding.txtConcept.text = importe.getConcept()
+        holder.binding.txtConcept.text = importe.concept
         holder.binding.txtDate.text = dateFormat.format(importe.getDate())
-        val amount = importe.getAmount()
+        val amount = importe.amount
         holder.binding.txtAmount.text = String.format(Locale.getDefault(), "%.2f€", amount)
         holder.binding.txtAmount.setTextColor(
             if (amount < 0) 0xFFD32F2F.toInt() else 0xFF388E3C.toInt()

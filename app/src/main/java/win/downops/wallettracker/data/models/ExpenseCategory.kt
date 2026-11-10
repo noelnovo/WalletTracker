@@ -1,28 +1,24 @@
 package win.downops.wallettracker.data.models
 
 class ExpenseCategory {
-    private var id: Long = 0
-    private var name: String = ""
-    private var total: Double = 0.0
+    private var _id: Long = 0
+    private var _name: String = ""
+    private var _total: Double = 0.0
     private var sortOrder: Int? = null
     constructor()
     constructor(name: String) {
-        this.name = name
+        this._name = name
     }
     constructor(id:Long, name: String) {
-        this.name = name
+        this._name = name
     }
     constructor(id: Long) {
-        this.id = id
+        this._id = id
     }
-    fun getId(): Long{
-        return this.id
-    }
-    fun getName(): String{
-        return this.name
-    }
+    val id: Long get() = _id
+    val name: String get() = _name
     fun setName(value: String){
-        this.name = value
+        this._name = value
     }
     fun getOrder(): Int?{
         return this.sortOrder
@@ -30,16 +26,12 @@ class ExpenseCategory {
     fun setOrder(value: Int?){
         this.sortOrder = value
     }
-    fun getTotal(): Double{
-        return this.total
-    }
+    val total: Double get() = _total
     fun setTotal(value: Double){
-        this.total = value
+        this._total = value
     }
     override fun toString(): String {
         return "ExpenseCategory(id=$id, name=$name, total=$total)"
     }
 
 }
-
-

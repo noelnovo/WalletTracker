@@ -41,6 +41,9 @@ class BillEditor(
     private val showDialog: (AlertDialog) -> Unit,
     private val save: (JSONObject) -> Unit,
 ) {
+    private companion object {
+        const val ADD_EXTRA = "Add extra"
+    }
     private class Person(val number: Int, val name: TextInputEditText, val row: LinearLayout, val remove: MaterialButton) {
         fun label() = name.text.toString().trim().ifEmpty { "Person $number" }
     }
@@ -99,9 +102,13 @@ class BillEditor(
 
     private fun watch(field: android.widget.EditText) {
         field.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {
+                // No preparation is needed before an edit.
+            }
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { field.error = null; refresh() }
-            override fun afterTextChanged(s: Editable?) {}
+            override fun afterTextChanged(s: Editable?) {
+                // Validation happens on text change, not after it.
+            }
         })
     }
 
@@ -149,7 +156,7 @@ class BillEditor(
                 extras.add(Extra(item.optString("description"), item.getLong("amount_minor"), people.firstOrNull { it.label() == item.getString("participant") }))
             }
         }
-        steps[1].addView(textButton("Add extra") { editExtra(null) }.apply { setIconResource(R.drawable.wallet_ic_plus) })
+        steps[1].addView(textButton(ADD_EXTRA) { editExtra(null) }.apply { setIconResource(R.drawable.wallet_ic_plus) })
 
         steps[2].addView(design.heading("Everyone's share"))
         reviewContainer = design.column()
@@ -235,7 +242,7 @@ class BillEditor(
         if (existing != null) extraBody.addView(textButton("Remove extra") {
             extras.remove(existing); extraDialog.dismiss(); refresh()
         }.apply { setTextColor(design.error) })
-        extraDialog = form(if (existing == null) "Add extra" else "Edit extra", extraBody, if (existing == null) "Add extra" else "Save extra", "Cancel", null, {
+        extraDialog = form(if (existing == null) ADD_EXTRA else "Edit extra", extraBody, if (existing == null) ADD_EXTRA else "Save extra", "Cancel", null, {
             try {
                 val minor = BillSplitter.amount(price.text.toString())
                 val label = name.text.toString().trim()

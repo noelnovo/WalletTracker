@@ -29,16 +29,18 @@ class ProductionSigningTests(unittest.TestCase):
 
     def test_tag_for_a_different_declared_version_is_rejected_before_git(self):
         with patch.object(build_prod, 'version', return_value='3.1.0'), patch.object(build_prod, 'command') as command:
+            environment = self.environment()
             with self.assertRaises(RuntimeError):
-                build_prod.validate_identity(self.environment())
+                build_prod.validate_identity(environment)
             command.assert_not_called()
 
     def test_unprotected_or_nonproduction_identity_cannot_sign(self):
         for changes in ({'GITHUB_REPOSITORY_ID': '1'}, {'GITHUB_REF_NAME': 'v2.2.2'}, {'GITHUB_REF_PROTECTED': 'false'},
                         {'GITHUB_REPOSITORY_OWNER_ID': '1'}, {'GITHUB_EVENT_NAME': 'pull_request'}):
             with self.subTest(changes=changes), patch.object(build_prod, 'command') as command:
+                environment = self.environment(**changes)
                 with self.assertRaises(RuntimeError):
-                    build_prod.validate_identity(self.environment(**changes))
+                    build_prod.validate_identity(environment)
                 command.assert_not_called()
 
     def test_matching_main_and_tag_are_required(self):
@@ -49,8 +51,9 @@ class ProductionSigningTests(unittest.TestCase):
     def test_tag_outside_github_main_blocks_production_signing(self):
         outputs = ['', 'a' * 40, RuntimeError('Synthetic non-main ancestry')]
         with patch.object(build_prod, 'command', side_effect=outputs):
+            environment = self.environment()
             with self.assertRaises(RuntimeError):
-                build_prod.validate_identity(self.environment())
+                build_prod.validate_identity(environment)
 
     def test_different_apk_certificate_is_rejected(self):
         with patch.object(build_prod, 'command', return_value='Signer #1 certificate SHA-256 digest: ' + 'b' * 64):
@@ -80,8 +83,9 @@ class ProductionSigningTests(unittest.TestCase):
 
     def test_check_tag_cannot_authorize_a_real_release(self):
         with patch.object(build_prod, 'command') as command:
+            environment = github_environment(ref='refs/tags/v3.0.0-ci-check')
             with self.assertRaises(RuntimeError):
-                build_prod.validate_identity(github_environment(ref='refs/tags/v3.0.0-ci-check'))
+                build_prod.validate_identity(environment)
             command.assert_not_called()
 
     def test_check_requires_exact_protected_tag_project_namespace(self):
@@ -172,9 +176,10 @@ class ProductionSigningTests(unittest.TestCase):
                              valid.replace('API_VERSION = "2"', 'API_VERSION = "1"'),
                              valid.replace('SIGN_SECRET = ""', 'SIGN_SECRET = "synthetic-not-empty"'),
                              valid.replace('https://api.downops.win', 'https://wallettracker-dev.int.downops.win')):
-                    with self.subTest(text=text), self.assertRaises(RuntimeError):
+                    with self.subTest(text=text):
                         config.write_text(text)
-                        build_prod.validate_built_configuration(root / 'sdk', root / 'unsigned.apk', {})
+                        with self.assertRaises(RuntimeError):
+                            build_prod.validate_built_configuration(root / 'sdk', root / 'unsigned.apk', {})
 
     def test_registration_action_is_not_gated_by_the_build_variant(self):
         activity = (build_prod.ROOT / 'app/src/main/java/win/downops/wallettracker/v2/WalletActivity.kt').read_text()
