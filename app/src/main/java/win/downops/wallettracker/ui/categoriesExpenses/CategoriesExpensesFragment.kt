@@ -62,7 +62,7 @@ class CategoriesExpensesFragment() : Fragment() {
                 is AppResult.Success -> {
                     val category = result.data
                     if (category != null) {
-                        binding.inputName.setText(category.getName())
+                        binding.inputName.setText(category.name)
                         loadExpenses()
                     }
                 }
@@ -201,7 +201,7 @@ class CategoriesExpensesFragment() : Fragment() {
                         @RequiresApi(Build.VERSION_CODES.O)
                         override fun onDismissed(transientBottomBar: Snackbar?, event: Int) {
                             if (event != Snackbar.Callback.DISMISS_EVENT_ACTION && isAdded) {
-                                viewModel.deleteExpense(delExpense.getId())
+                                viewModel.deleteExpense(delExpense.id)
                             }
                         }
                     })
@@ -226,7 +226,7 @@ class CategoriesExpensesFragment() : Fragment() {
         binding.saveChanges.setOnClickListener {
             saveIfValid()
         }
-        binding.inputName.setOnEditorActionListener { v, actionId, event ->
+        binding.inputName.setOnEditorActionListener { _, actionId, event ->
             if (actionId == EditorInfo.IME_ACTION_DONE ||
                 (event != null && event.keyCode == KeyEvent.KEYCODE_ENTER)) {
 
@@ -271,7 +271,7 @@ class CategoriesExpensesFragment() : Fragment() {
     }
 
     private fun checkValidation(category: ExpenseCategory): Boolean {
-        return category.getName().isNotEmpty()
+        return category.name.isNotEmpty()
     }
 
     private fun saveChanges() {

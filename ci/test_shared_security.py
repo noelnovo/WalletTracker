@@ -4,7 +4,7 @@ import re
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-PIN = 'noelnovo/.github/.github/workflows/dependency-track-scan.yml@55425668e1d0aaac5a60c7eec35b91a99d483b79'
+PIN = 'noelnovo/.github/.github/workflows/dependency-track-scan.yml@cc4ce6779f6f4ee751f1f30b2a319b08adb20830'
 
 
 class SharedSecurityTests(unittest.TestCase):

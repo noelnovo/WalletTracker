@@ -66,7 +66,9 @@ class CategoriesFragment : Fragment() {
         }
         viewModel.editCategoryResult.observe(viewLifecycleOwner){ result ->
             when (result) {
-                is AppResult.Success -> { }
+                is AppResult.Success -> {
+                    // Intentionally empty: a successful edit only updates the repository, no UI change needed
+                }
                 is AppResult.Error -> {
                     AppResultHandler.handleError(requireContext(), result)
                 }
@@ -114,6 +116,12 @@ class CategoriesFragment : Fragment() {
 
     private fun displayCategories(categories: List<ExpenseCategory>) {
         val mutableCategories = categories.toMutableList()
+        setupCategoriesAdapter(mutableCategories)
+        attachSwipeCallback(mutableCategories, categories)
+        loadTotal()
+    }
+
+    private fun setupCategoriesAdapter(mutableCategories: MutableList<ExpenseCategory>) {
         if (binding.rviewCategories.layoutManager == null || binding.rviewCategories.adapter == null) {
             binding.rviewCategories.layoutManager = LinearLayoutManager(requireContext())
             val adapter = RViewCategoriesAdapter(mutableCategories)
@@ -123,7 +131,9 @@ class CategoriesFragment : Fragment() {
         } else {
             (binding.rviewCategories.adapter as RViewCategoriesAdapter).updateData(mutableCategories)
         }
+    }
 
+    private fun attachSwipeCallback(mutableCategories: MutableList<ExpenseCategory>, categories: List<ExpenseCategory>) {
         val simpleCallback = object : ItemTouchHelper.SimpleCallback(
             ItemTouchHelper.UP or ItemTouchHelper.DOWN,
             ItemTouchHelper.START or ItemTouchHelper.END
@@ -138,7 +148,7 @@ class CategoriesFragment : Fragment() {
                 Collections.swap(mutableCategories, fromPosition, toPosition)
                 recyclerView.adapter?.notifyItemMoved(fromPosition, toPosition)
 
-                Logger.log("${categories[fromPosition].getName()} moved from $fromPosition to $toPosition")
+                Logger.log("${categories[fromPosition].name} moved from $fromPosition to $toPosition")
 
                 updateCategoriesSortOrder(mutableCategories)
 
@@ -156,7 +166,6 @@ class CategoriesFragment : Fragment() {
                         "Category deleted",
                         Snackbar.LENGTH_LONG
                     )
-                    val undo = false
                     snackbar!!.setAction("Undo") {
                         snackbar = null
                         (binding.rviewCategories.adapter as RViewCategoriesAdapter).addItem(viewHolder.adapterPosition, categories[backupPosition])
@@ -167,7 +176,7 @@ class CategoriesFragment : Fragment() {
                         override fun onDismissed(transientBottomBar: Snackbar?, event: Int) {
                             if (event != Snackbar.Callback.DISMISS_EVENT_ACTION) {
                                 snackbar = null
-                                deleteCategory(delCat.getId())
+                                deleteCategory(delCat.id)
                                 if (_binding != null) loadTotal()
                             }
                         }
@@ -192,9 +201,6 @@ class CategoriesFragment : Fragment() {
 
         val itemTouchHelper = ItemTouchHelper(simpleCallback)
         itemTouchHelper.attachToRecyclerView(binding.rviewCategories)
-
-
-        loadTotal()
     }
 
     @SuppressLint("DefaultLocale", "SetTextI18n")
@@ -202,7 +208,7 @@ class CategoriesFragment : Fragment() {
         try {
             val adapter = binding.rviewCategories.adapter as RViewCategoriesAdapter
             val categories = adapter.list
-            val totalSum = categories.sumOf { it.getTotal() }
+            val totalSum = categories.sumOf { it.total }
             binding.lblTotal.text = String.format("%.2f", totalSum) + "€"
         } catch (ex: Exception) {
             Logger.log(ex)

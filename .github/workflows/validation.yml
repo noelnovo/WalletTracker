@@ -44,7 +44,7 @@ jobs:
           packages: platform-tools
       - run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
       - name: Test and build APKs
-        run: sh gradlew --no-daemon --max-workers=2 '-Dorg.gradle.jvmargs=-Xmx1536m -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8' -Pkotlin.compiler.execution.strategy=in-process testDebugUnitTest assembleDebug assembleRelease cyclonedxBom
+        run: sh gradlew --no-daemon --max-workers=2 '-Dorg.gradle.jvmargs=-Xmx1536m -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8' -Pkotlin.compiler.execution.strategy=in-process testDebugUnitTest jacocoTestReport assembleDebug assembleRelease cyclonedxBom
       - name: Retain resolved SBOM and bytecode for exact-source security analysis
         if: github.event_name == 'push'
         uses: actions/upload-artifact@v4
@@ -52,6 +52,7 @@ jobs:
           name: security-input-${{ github.sha }}-${{ github.run_attempt }}
           path: |
             build/reports/cyclonedx/bom.json
+            app/build/reports/jacoco/**/jacocoTestReport.xml
             app/build/intermediates/javac/**/classes/**
             app/build/tmp/kotlin-classes/**
             app/build/intermediates/built_in_kotlinc/**/classes/**
@@ -85,7 +86,7 @@ jobs:
       actions: read
       statuses: write
       id-token: write
-    uses: noelnovo/.github/.github/workflows/dependency-track-scan.yml@55425668e1d0aaac5a60c7eec35b91a99d483b79
+    uses: noelnovo/.github/.github/workflows/dependency-track-scan.yml@cc4ce6779f6f4ee751f1f30b2a319b08adb20830
 
   # Preserve the exact mandatory release-evidence job name. This is only an
   # aggregate result: scanner implementation/credentials live in the generic.

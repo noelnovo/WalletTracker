@@ -5,43 +5,43 @@ import java.text.SimpleDateFormat
 import java.util.Locale
 
 class Importe {
-    private var id: Long = 0
-    private var concept: String = ""
+    private var _id: Long = 0
+    private var _concept: String = ""
     private var importeDate: Date? = null
-    private var amount: Double = 0.0
-    private var balanceAfter: Double = 0.0
-    private var seasonId: Long = 0
+    private var _amount: Double = 0.0
+    private var _balanceAfter: Double = 0.0
+    private var _seasonId: Long = 0
 
     constructor()
     constructor(id: Long, concept: String, importeDate: Date?, amount: Double, balanceAfter: Double, seasonId: Long) {
-        this.id = id
-        this.concept = concept
+        this._id = id
+        this._concept = concept
         this.importeDate = importeDate
-        this.amount = amount
-        this.balanceAfter = balanceAfter
-        this.seasonId = seasonId
+        this._amount = amount
+        this._balanceAfter = balanceAfter
+        this._seasonId = seasonId
     }
     constructor(concept: String, importeDate: Date?, amount: Double, balanceAfter: Double, seasonId: Long) {
-        this.concept = concept
+        this._concept = concept
         this.importeDate = importeDate
-        this.amount = amount
-        this.balanceAfter = balanceAfter
-        this.seasonId = seasonId
+        this._amount = amount
+        this._balanceAfter = balanceAfter
+        this._seasonId = seasonId
     }
     constructor(id: Long) {
-        this.id = id
+        this._id = id
     }
 
-    fun getId(): Long = id
-    fun getConcept(): String = concept
-    fun setConcept(value: String) { concept = value }
+    val id: Long get() = _id
+    val concept: String get() = _concept
+    fun setConcept(value: String) { _concept = value }
     fun getDate(): Date = importeDate!!
     fun getDateString(): String = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(importeDate)
     fun setDate(value: Date) { importeDate = value }
-    fun getAmount(): Double = amount
-    fun setAmount(value: Double) { amount = value }
-    fun getBalanceAfter(): Double = balanceAfter
-    fun setBalanceAfter(value: Double) { balanceAfter = value }
-    fun getSeasonId(): Long = seasonId
-    fun setSeasonId(value: Long) { seasonId = value }
+    val amount: Double get() = _amount
+    fun setAmount(value: Double) { _amount = value }
+    val balanceAfter: Double get() = _balanceAfter
+    fun setBalanceAfter(value: Double) { _balanceAfter = value }
+    val seasonId: Long get() = _seasonId
+    fun setSeasonId(value: Long) { _seasonId = value }
 }

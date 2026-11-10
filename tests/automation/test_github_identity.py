@@ -12,18 +12,23 @@ class GitHubIdentityTests(unittest.TestCase):
                        {'GITHUB_REPOSITORY_OWNER_ID': '1'}, {'GITHUB_REPOSITORY': 'fork/WalletTracker'},
                        {'GITHUB_WORKFLOW_REF': 'other/workflow'}, {'GITHUB_EVENT_NAME': 'pull_request'},
                        {'GITHUB_SHA': 'not-a-source-revision'}):
-            with self.subTest(change=change), self.assertRaises(RuntimeError):
-                require_repository(github_environment(**change))
+            with self.subTest(change=change):
+                environment = github_environment(**change)
+                with self.assertRaises(RuntimeError):
+                    require_repository(environment)
 
     def test_production_requires_protected_tag_but_dev_does_not_read_production(self):
         require_dev(github_environment(ref='refs/heads/dev'))
         require_production(github_environment())
+        unprotected = github_environment()
         with self.assertRaises(RuntimeError):
-            require_dev(github_environment())
+            require_dev(unprotected)
+        development = github_environment(ref='refs/heads/dev')
         with self.assertRaises(RuntimeError):
-            require_production(github_environment(ref='refs/heads/dev'))
+            require_production(development)
+        unprotected_tag = github_environment(GITHUB_REF_PROTECTED='false')
         with self.assertRaises(RuntimeError):
-            require_production(github_environment(GITHUB_REF_PROTECTED='false'))
+            require_production(unprotected_tag)
 
     def test_gradle_receives_no_job_identity_or_production_signing_secrets(self):
         secrets = ('VAULT_TOKEN', 'VAULT_ID_TOKEN', 'GH_TOKEN', 'GITHUB_TOKEN', 'SIGNING_INPUT_JSON',

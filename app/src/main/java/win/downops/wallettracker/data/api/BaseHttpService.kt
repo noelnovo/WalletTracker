@@ -31,8 +31,7 @@ abstract class BaseHttpService(
     private fun decryptData(data: CipheredRequest?): String {
         val (encryptedAesKey, iv, ciphertext, tag) = data
             ?: throw IllegalArgumentException("CipheredRequest is null")
-        if (encryptedAesKey.isNullOrEmpty() || iv.isNullOrEmpty() || ciphertext.isNullOrEmpty() || tag.isNullOrEmpty())
-            throw IllegalStateException("Invalid CipheredRequest")
+        check(!(encryptedAesKey.isNullOrEmpty() || iv.isNullOrEmpty() || ciphertext.isNullOrEmpty() || tag.isNullOrEmpty())) { "Invalid CipheredRequest" }
         return Cryptography.hybridDecrypt(getPrivateKey(), encryptedAesKey, iv, ciphertext, tag)
     }
 
@@ -42,7 +41,7 @@ abstract class BaseHttpService(
     protected fun validateCipheredResponse(response: BaseResponse<CipheredResponse>?): String {
         val ciphered = response?.data ?: throw Exception("Unexpected error")
         if (ciphered.signature.isNullOrEmpty()) throw Exception("Invalid signature")
-        val decrypted = decryptData(ciphered.encrypted_data)
+        val decrypted = decryptData(ciphered.encryptedData)
         if (!verifySignature(ciphered.signature)) throw Exception("Invalid signature")
         return decrypted
     }

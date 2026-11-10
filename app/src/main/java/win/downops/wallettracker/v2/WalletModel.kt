@@ -122,45 +122,53 @@ class WalletModel(application: Application) : AndroidViewModel(application) {
                 acceptTokens(api.call("refresh", JSONObject().put("refresh_token", refresh)))
             }
             if (!unlocked) return@withLock
-            withContext(Dispatchers.IO) {
-                // Send first so our own acknowledged writes are not reported as conflicts.
-                var operations = local.pending()
-                while (operations.length() > 0 && unlocked) {
-                    val result = api.call("sync", JSONObject().put("operations", operations), access)
-                    local.acknowledge(operations, result.getJSONArray("results"))
-                    operations = local.pending()
-                }
-                if (!unlocked) return@withContext
-                do {
-                    val page = api.call("sync?cursor=${local.cursor()}&limit=100", token=access)
-                    local.applyPage(page)
-                } while (page.getBoolean("has_more") && unlocked)
-                // Configuration is best-effort; failures keep the last known values.
-                runCatching {
-                    val properties = api.call("properties", token = access)
-                    properties.optJSONArray("currencies")?.let { list ->
-                        val values = List(list.length()) { list.getString(it) }
-                        if (values.isNotEmpty()) currencies.value = values
-                    }
-                }
-            }
+            transfer(local)
             if (!unlocked) return@withLock
-            val summary = withContext(Dispatchers.IO) {
-                val conflicts = local.rows(true).count { it.optBoolean("has_conflict") }
-                if (local.blockedItemizedBills() > 0) "Itemized bills need a server update; saved on this phone"
-                else if (conflicts > 0) "Review ($conflicts)" else if (local.pendingCount() > 0) "Pending" else "Synced"
-            }
+            status.value = summarize(local)
             if (!unlocked) return@withLock
-            status.value = summary
             changes.value++
         } catch (error: IOException) {
             if (!unlocked) return@withLock
             if (error is ItemizedBillSyncUnavailable) withContext(Dispatchers.IO) { local.retainIncompatibleBill(error) }
-            status.value = if (error is ItemizedBillSyncUnavailable) error.message.orEmpty() else if (error is ApiFailure) {
-                if (error.status == 401) "Sign in again" else error.message ?: "Sync failed"
-            } else "Offline"
+            status.value = failureLabel(error)
             changes.value++
         }
+    }
+
+    /** Push outbox operations, then pull pages, then refresh configuration. */
+    private suspend fun transfer(local: FinanceStore) = withContext(Dispatchers.IO) {
+        // Send first so our own acknowledged writes are not reported as conflicts.
+        var operations = local.pending()
+        while (operations.length() > 0 && unlocked) {
+            val result = api.call("sync", JSONObject().put("operations", operations), access)
+            local.acknowledge(operations, result.getJSONArray("results"))
+            operations = local.pending()
+        }
+        if (!unlocked) return@withContext
+        do {
+            val page = api.call("sync?cursor=${local.cursor()}&limit=100", token=access)
+            local.applyPage(page)
+        } while (page.getBoolean("has_more") && unlocked)
+        // Configuration is best-effort; failures keep the last known values.
+        runCatching {
+            val properties = api.call("properties", token = access)
+            properties.optJSONArray("currencies")?.let { list ->
+                val values = List(list.length()) { list.getString(it) }
+                if (values.isNotEmpty()) currencies.value = values
+            }
+        }
+    }
+
+    private suspend fun summarize(local: FinanceStore): String = withContext(Dispatchers.IO) {
+        val conflicts = local.rows(true).count { it.optBoolean("has_conflict") }
+        if (local.blockedItemizedBills() > 0) "Itemized bills need a server update; saved on this phone"
+        else if (conflicts > 0) "Review ($conflicts)" else if (local.pendingCount() > 0) "Pending" else "Synced"
+    }
+
+    private fun failureLabel(error: IOException): String = when (error) {
+        is ItemizedBillSyncUnavailable -> error.message.orEmpty()
+        is ApiFailure -> if (error.status == 401) "Sign in again" else error.message ?: "Sync failed"
+        else -> "Offline"
     }
 
     suspend fun logout() {

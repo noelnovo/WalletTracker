@@ -39,12 +39,12 @@ class DevSigningTests(unittest.TestCase):
                         build_dev.main()
                         request.assert_not_called()
                         env = run.call_args.kwargs['env']
-                        self.assertEqual(env['DEV_KEY_PASSWORD'], key_password or values['KEYSTORE_PASSWORD'])
+                        self.assertEqual(key_password or values['KEYSTORE_PASSWORD'], env['DEV_KEY_PASSWORD'])
                         self.assertNotIn('VAULT_ID_TOKEN', env)
                         self.assertNotIn('VAULT_TOKEN', env)
                         self.assertNotIn('ACTIONS_ID_TOKEN_REQUEST_TOKEN', env)
                         self.assertNotIn('SIGNING_INPUT_JSON', env)
-                        self.assertEqual(list(pathlib.Path(directory).iterdir()), [])
+                        self.assertEqual([], list(pathlib.Path(directory).iterdir()))
                         verify.assert_called_once()
 
     def test_non_dev_identity_cannot_read_signing_secrets(self):
@@ -69,8 +69,8 @@ class DevSigningTests(unittest.TestCase):
 
     def test_policy_plan_matches_exact_dev_record(self):
         plan = json.loads((build_dev.ROOT / 'config/signing/dev-signing-vault-plan.json').read_text())
-        self.assertEqual(f"{plan['kv_mount']}/data/{plan['kv_v2_path']}", build_dev.DEV_SIGNING_PATH)
-        self.assertEqual(plan['policy'], 'path "downops/data/apps/wallettracker/dev/mobile" { capabilities = ["read"] }')
+        self.assertEqual(build_dev.DEV_SIGNING_PATH, f"{plan['kv_mount']}/data/{plan['kv_v2_path']}")
+        self.assertEqual('path "downops/data/apps/wallettracker/dev/mobile" { capabilities = ["read"] }', plan['policy'])
         self.assertNotIn('KEY_PASSWORD', plan['required_keys'])
 
     def test_dev_is_validation_only_and_does_not_release_signed_apks(self):
@@ -107,9 +107,9 @@ class DevSigningTests(unittest.TestCase):
                 receipt_path = root / 'artifacts/dev-receipt.json'
                 if outcome == 'valid':
                     receipt = json.loads(receipt_path.read_text())
-                    self.assertEqual(receipt['certificate_public_sha256'], expected)
-                    self.assertIs(receipt['signer_matches_dev_record'], True)
-                    self.assertIs(receipt['distinct_from_production'], True)
+                    self.assertEqual(expected, receipt['certificate_public_sha256'])
+                    self.assertIs(True, receipt['signer_matches_dev_record'])
+                    self.assertIs(True, receipt['distinct_from_production'])
                 else:
                     self.assertFalse(receipt_path.exists())
                 for call in run.call_args_list:

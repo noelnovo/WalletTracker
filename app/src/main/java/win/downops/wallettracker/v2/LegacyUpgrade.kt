@@ -100,33 +100,37 @@ class LegacyUpgrade(
         val expenses = rows(recovery, "Expense")
         val records = mutableListOf<JSONObject>()
         val validCategories = mutableMapOf<Long, Boolean>()
-        categories.forEach { old ->
-            val name = old.optString("name", "").takeUnless { it == "null" }.orEmpty()
-            val valid = name.isNotBlank() && name.length <= 80
-            val id = old.getLong("id")
-            validCategories[id] = valid
-            records.add(record(identifier("category", id), "category", JSONObject().put("name", name.ifBlank { "Unnamed category" }), if (valid) emptyList() else listOf("Category")))
-        }
-        expenses.forEach { old ->
-            val issues = mutableListOf<String>()
-            val amount = runCatching { BigDecimal(old.get("price").toString()).movePointRight(2).setScale(0, RoundingMode.HALF_UP).longValueExact() }.getOrNull()
-            if (amount == null || amount !in 1..99999999999L) issues.add("Amount")
-            val day = old.optString("expenseDate", "").takeUnless { it == "null" }.orEmpty()
-            val parser = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { isLenient = false }
-            if (!day.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) || runCatching { parser.format(requireNotNull(parser.parse(day))) == day }.getOrDefault(false).not()) issues.add("Date")
-            val category = old.optLong("category", -1)
-            if (validCategories[category] != true) issues.add("Category")
-            val description = old.optString("description", "").takeUnless { it == "null" }.orEmpty().ifBlank { "Expense" }
-            if (description.length > 255) issues.add("Description")
-            val payload = JSONObject().put("amount_minor", amount ?: 0).put("currency", "EUR")
-                .put("date", day).put("description", description)
-                .put("category_id", if (category in validCategories) identifier("category", category) else "")
-            records.add(record(identifier("expense", old.getLong("id")), "expense", payload, issues))
-        }
+        categories.forEach { old -> snapshotCategory(old, records, validCategories) }
+        expenses.forEach { old -> snapshotExpense(old, records, validCategories) }
         var otherRows = 0
         recovery.keys().forEach { name -> if (name !in listOf("Expense", "ExpenseCategory")) otherRows += rows(recovery, name).size }
         if (records.isEmpty() && otherRows == 0) return null
         return Snapshot(sourceId, records, recovery, categories.size, expenses.size, otherRows)
+    }
+
+    private fun snapshotCategory(old: JSONObject, records: MutableList<JSONObject>, validCategories: MutableMap<Long, Boolean>) {
+        val name = old.optString("name", "").takeUnless { it == "null" }.orEmpty()
+        val valid = name.isNotBlank() && name.length <= 80
+        val id = old.getLong("id")
+        validCategories[id] = valid
+        records.add(record(identifier("category", id), "category", JSONObject().put("name", name.ifBlank { "Unnamed category" }), if (valid) emptyList() else listOf("Category")))
+    }
+
+    private fun snapshotExpense(old: JSONObject, records: MutableList<JSONObject>, validCategories: Map<Long, Boolean>) {
+        val issues = mutableListOf<String>()
+        val amount = runCatching { BigDecimal(old.get("price").toString()).movePointRight(2).setScale(0, RoundingMode.HALF_UP).longValueExact() }.getOrNull()
+        if (amount == null || amount !in 1..99999999999L) issues.add("Amount")
+        val day = old.optString("expenseDate", "").takeUnless { it == "null" }.orEmpty()
+        val parser = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { isLenient = false }
+        if (!day.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) || runCatching { parser.format(requireNotNull(parser.parse(day))) == day }.getOrDefault(false).not()) issues.add("Date")
+        val category = old.optLong("category", -1)
+        if (validCategories[category] != true) issues.add("Category")
+        val description = old.optString("description", "").takeUnless { it == "null" }.orEmpty().ifBlank { "Expense" }
+        if (description.length > 255) issues.add("Description")
+        val payload = JSONObject().put("amount_minor", amount ?: 0).put("currency", "EUR")
+            .put("date", day).put("description", description)
+            .put("category_id", if (category in validCategories) identifier("category", category) else "")
+        records.add(record(identifier("expense", old.getLong("id")), "expense", payload, issues))
     }
 
     /** Archive first, verify it, then import atomically; never infer account ownership. */

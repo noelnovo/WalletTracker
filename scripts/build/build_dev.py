@@ -52,30 +52,58 @@ def verify_artifact(keyfile, values, env):
     print('Development APK signature and stable signer verified; receipt produced', flush=True)
 
 
+def http_failure_category(error):
+    """Bound an HTTP failure to a coarse format and edge-challenge category."""
+    headers = error.headers or {}
+    content = headers.get('Content-Type', '').lower()
+    if 'text/html' in content:
+        kind = 'html'
+    elif 'json' in content:
+        kind = 'json'
+    else:
+        kind = 'other'
+    challenge = headers.get('cf-mitigated', '').lower() == 'challenge'
+    error.close()
+    return 'public-dependency-http-' + str(error.code) + '; format=' + kind + '; edge-challenge=' + str(challenge).lower()
+
+
+def missing_input_category(error):
+    """Bound a missing tool or required input to a coarse category."""
+    if isinstance(error, FileNotFoundError):
+        tool = pathlib.Path(error.filename or '').name
+        if tool in ('keytool', 'apksigner', 'gradlew'):
+            return 'missing-tool-' + tool
+        return 'missing-tool-unclassified'
+    key = error.args[0] if error.args else ''
+    if key in ('ANDROID_HOME', 'GITHUB_SHA', 'KEY_ALIAS', 'KEYSTORE_PASSWORD'):
+        return 'missing-input-' + key
+    return 'missing-input-unclassified'
+
+
+def runtime_failure_category(error):
+    """Bound a signing or validation failure to a coarse category."""
+    fixed = str(error)
+    if fixed.startswith('The verified signing outputs') or fixed == 'The verified Vault action signing outputs are required':
+        return 'vault-action-output-input'
+    if fixed == 'The development signing record is incomplete':
+        return 'keystore-record-incomplete'
+    if 'GitHub' in fixed or 'workflow identity' in fixed:
+        return 'github-job-identity'
+    if 'certificate' in fixed or 'signing identity' in fixed:
+        return 'dev-signer-verification'
+    return 'runtime-validation-failed'
+
+
 def report_failure(error):
     """A bounded public CI annotation; never expose exception bodies or credentials."""
     if isinstance(error, urllib.error.HTTPError):
-        headers = error.headers or {}
-        content = headers.get('Content-Type', '').lower()
-        kind = 'html' if 'text/html' in content else 'json' if 'json' in content else 'other'
-        challenge = headers.get('cf-mitigated', '').lower() == 'challenge'
-        category = 'public-dependency-http-' + str(error.code) + '; format=' + kind + '; edge-challenge=' + str(challenge).lower()
-        error.close()
-    elif isinstance(error, FileNotFoundError):
-        tool = pathlib.Path(error.filename or '').name
-        category = 'missing-tool-' + (tool if tool in ('keytool', 'apksigner', 'gradlew') else 'unclassified')
+        category = http_failure_category(error)
+    elif isinstance(error, (FileNotFoundError, KeyError)):
+        category = missing_input_category(error)
     elif isinstance(error, subprocess.CalledProcessError):
         category = 'gradle-build-failed'
-    elif isinstance(error, KeyError):
-        key = error.args[0] if error.args else ''
-        category = 'missing-input-' + (key if key in ('ANDROID_HOME', 'GITHUB_SHA', 'KEY_ALIAS', 'KEYSTORE_PASSWORD') else 'unclassified')
     elif isinstance(error, RuntimeError):
-        fixed = str(error)
-        category = ('vault-action-output-input' if fixed.startswith('The verified signing outputs') or fixed == 'The verified Vault action signing outputs are required' else
-                    'keystore-record-incomplete' if fixed == 'The development signing record is incomplete' else
-                    'github-job-identity' if 'GitHub' in fixed or 'workflow identity' in fixed else
-                    'dev-signer-verification' if 'certificate' in fixed or 'signing identity' in fixed else
-                    'runtime-validation-failed')
+        category = runtime_failure_category(error)
     else:
         category = 'unexpected-build-error'
     print('::error title=WalletTracker signing diagnostic::' + category, flush=True)

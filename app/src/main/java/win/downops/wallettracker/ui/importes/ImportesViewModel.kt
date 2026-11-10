@@ -60,7 +60,7 @@ class ImportesViewModel @Inject constructor(
             if (result is AppResult.Success) {
                 allSeasons = result.data
                 val yearList = allSeasons
-                    .map { it.getYear() }
+                    .map { it.year }
                     .distinct()
                     .sortedDescending()
                     .map { YearOption(it, it.toString()) }
@@ -73,15 +73,15 @@ class ImportesViewModel @Inject constructor(
 
     fun selectYear(year: Int) {
         val monthList = allSeasons
-            .filter { it.getYear() == year }
-            .sortedByDescending { it.getMonth() }
-            .map { season -> MonthOption(season, monthNames.getOrElse(season.getMonth() - 1) { season.getMonth().toString() }) }
+            .filter { it.year == year }
+            .sortedByDescending { it.month }
+            .map { season -> MonthOption(season, monthNames.getOrElse(season.month - 1) { season.month.toString() }) }
         _months.value = monthList
 
         viewModelScope.launch {
             var validSeasonId: Long = 0
             for (month in monthList) {
-                val seasonId = month.season.getId()
+                val seasonId = month.season.id
                 val result = importeRepository.getBySeasonId(seasonId)
                 if(result is AppResult.Success && result.data.isNotEmpty()){
                     validSeasonId = seasonId
@@ -89,7 +89,7 @@ class ImportesViewModel @Inject constructor(
                 }
             }
             if(validSeasonId <= 0 && monthList.isNotEmpty()){
-                validSeasonId = monthList.first().season.getId()
+                validSeasonId = monthList.first().season.id
             }
 
             if (validSeasonId > 0) {
@@ -106,9 +106,9 @@ class ImportesViewModel @Inject constructor(
             if (result is AppResult.Success) {
                 val list = result.data
                 _importes.value = list
-                _total.value = list.sumOf { it.getAmount() }
-                _totalIncome.value = list.filter { it.getAmount() > 0 }.sumOf { it.getAmount() }
-                _totalExpense.value = list.filter { it.getAmount() < 0 }.sumOf { it.getAmount() }
+                _total.value = list.sumOf { it.amount }
+                _totalIncome.value = list.filter { it.amount > 0 }.sumOf { it.amount }
+                _totalExpense.value = list.filter { it.amount < 0 }.sumOf { it.amount }
             } else {
                 _importes.value = emptyList()
                 _total.value = 0.0

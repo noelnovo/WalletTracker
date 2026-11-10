@@ -24,7 +24,7 @@ def fixture(directory):
     directory.mkdir(parents=True)
     apk = b'synthetic-tested-unsigned-apk'
     (directory / 'app-release-unsigned.apk').write_bytes(apk)
-    (directory / 'BuildConfig.java').write_text(CONFIG)
+    (directory / 'BuildConfig.java').write_bytes(CONFIG.encode())
     receipt = {'schema': 1, 'purpose': 'unsigned-validation', 'publishable': False,
                'repository': REPOSITORY, 'repository_id': REPOSITORY_ID, 'source_revision': SHA,
                'version': VERSION, 'version_code': version_code(VERSION), 'run_id': 123, 'run_attempt': 2,
@@ -56,8 +56,11 @@ class ValidatedApkTests(unittest.TestCase):
                 elif mutation == 'config': (directory / 'BuildConfig.java').write_text('tampered')
                 elif mutation == 'extra': (directory / 'extra').write_text('unexpected')
                 elif mutation == 'symlink':
-                    (directory / 'BuildConfig.java').unlink()
-                    (directory / 'BuildConfig.java').symlink_to(directory / 'app-release-unsigned.apk')
+                    try:
+                        (directory / 'BuildConfig.java').unlink()
+                        (directory / 'BuildConfig.java').symlink_to(directory / 'app-release-unsigned.apk')
+                    except OSError:
+                        self.skipTest('Creating symlinks requires privileges on this platform')
                 else:
                     key, value = {'receipt-purpose': ('purpose', 'release'), 'receipt-branch': ('ref', 'refs/heads/dev'),
                                   'receipt-bool': ('schema', True)}[mutation]

@@ -23,8 +23,9 @@ class DatabaseHelper(context: Context?) :
     companion object {
         private const val DATABASE_NAME = "walletTracker.db"
         private const val DATABASE_VERSION = 8
+        private const val CREATE_TABLE = "CREATE TABLE "
         private const val TABLE_SESSION = "Session"
-        private const val CREATE_TABLE_SESSION = "CREATE TABLE " + TABLE_SESSION + " (" +
+        private const val CREATE_TABLE_SESSION = CREATE_TABLE + TABLE_SESSION + " (" +
                 "id INTEGER PRIMARY KEY AUTOINCREMENT, " +
                 "online Integer, " +
                 "token TEXT, " +
@@ -40,16 +41,16 @@ class DatabaseHelper(context: Context?) :
         private const val TABLE_IMPORTE = "Importe"
 
         private const val CREATE_TABLE_EXPENSE_CATEGORY =
-            "CREATE TABLE " + TABLE_EXPENSE_CATEGORY + " (" +
+            CREATE_TABLE + TABLE_EXPENSE_CATEGORY + " (" +
                     "id INTEGER PRIMARY KEY AUTOINCREMENT, " +
                     "sortOrder Integer NULL, " +
                     "name TEXT NOT NULL);"
-        private const val CREATE_TABLE_SEASON = "CREATE TABLE " + TABLE_SEASON + " (" +
+        private const val CREATE_TABLE_SEASON = CREATE_TABLE + TABLE_SEASON + " (" +
                 "id INTEGER PRIMARY KEY AUTOINCREMENT, " +
                 "year INTEGER NOT NULL, " +
                 "month INTEGER NOT NULL, " +
                 "UNIQUE(year, month));"
-        private const val CREATE_TABLE_EXPENSE = "CREATE TABLE " + TABLE_EXPENSE + " (" +
+        private const val CREATE_TABLE_EXPENSE = CREATE_TABLE + TABLE_EXPENSE + " (" +
                 "id INTEGER PRIMARY KEY AUTOINCREMENT, " +
                 "price DOUBLE, " +
                 "description TEXT, " +
@@ -58,7 +59,7 @@ class DatabaseHelper(context: Context?) :
                 "seasonId INTEGER NULL, " +
                 "FOREIGN KEY(category) REFERENCES " + TABLE_EXPENSE_CATEGORY + "(id) ON DELETE CASCADE, " +
                 "FOREIGN KEY(seasonId) REFERENCES " + TABLE_SEASON + "(id) ON DELETE SET NULL);"
-        private const val CREATE_TABLE_IMPORTE = "CREATE TABLE " + TABLE_IMPORTE + " (" +
+        private const val CREATE_TABLE_IMPORTE = CREATE_TABLE + TABLE_IMPORTE + " (" +
                 "id INTEGER PRIMARY KEY AUTOINCREMENT, " +
                 "concept TEXT, " +
                 "importeDate DATE, " +

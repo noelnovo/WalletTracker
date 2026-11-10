@@ -12,8 +12,6 @@ import android.net.Network
 import android.os.Bundle
 import android.os.Parcelable
 import android.text.InputType
-import android.text.Editable
-import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -78,6 +76,8 @@ class WalletActivity : AppCompatActivity() {
         const val CHOOSE_DATE = "Choose date"
         const val ADD_DEBT = "Add debt"
         const val ISO_DATE = "yyyy-MM-dd"
+        const val USE_PASSWORD = "Use password"
+        const val LOCAL_WALLET = "Local wallet"
     }
     private val model: WalletModel by viewModels()
     private lateinit var root: LinearLayout
@@ -194,13 +194,6 @@ class WalletActivity : AppCompatActivity() {
     private fun textButton(label: String, action: () -> Unit) = MaterialButton(this, null,
         androidx.appcompat.R.attr.borderlessButtonStyle).apply {
         text = label; isAllCaps = false; minHeight = dp(48); setOnClickListener { action() }
-    }
-    private fun watch(field: android.widget.EditText, action: () -> Unit) {
-        field.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { action() }
-            override fun afterTextChanged(s: Editable?) {}
-        })
     }
     private fun input(parent: LinearLayout, hint: String, type: Int = InputType.TYPE_CLASS_TEXT): TextInputEditText {
         val box = TextInputLayout(this).apply { this.hint = hint; boxBackgroundMode = TextInputLayout.BOX_BACKGROUND_OUTLINE }
@@ -409,6 +402,14 @@ class WalletActivity : AppCompatActivity() {
         allRows = emptyList(); visibleRows = emptyList(); categoryNames = emptyMap(); pendingChanges = 0
         pages.clear(); settingsStatus = null
         root.removeAllViews()
+        buildHeader()
+        val readableWidth = minOf(resources.displayMetrics.widthPixels, dp(640))
+        pageHost = FrameLayout(this)
+        root.addView(pageHost, LinearLayout.LayoutParams(readableWidth, 0, 1f).apply { gravity = Gravity.CENTER_HORIZONTAL })
+        navigation = buildNavigation().also { root.addView(it) }
+    }
+
+    private fun buildHeader() {
         val header = column()
         val brand = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         brand.addView(design.text("WalletTracker", 13f, primary, true))
@@ -423,8 +424,9 @@ class WalletActivity : AppCompatActivity() {
         header.addView(titleRow)
         val readableWidth = minOf(resources.displayMetrics.widthPixels, dp(640))
         root.addView(header, LinearLayout.LayoutParams(readableWidth, -2).apply { gravity = Gravity.CENTER_HORIZONTAL })
-        pageHost = FrameLayout(this)
-        root.addView(pageHost, LinearLayout.LayoutParams(readableWidth, 0, 1f).apply { gravity = Gravity.CENTER_HORIZONTAL })
+    }
+
+    private fun buildNavigation(): BottomNavigationView {
         val nav = BottomNavigationView(this)
         nav.menu.add(0, 1, 0, "Expenses").setIcon(R.drawable.wallet_ic_expense)
         nav.menu.add(0, 2, 1, "Bills").setIcon(R.drawable.wallet_ic_people)
@@ -437,10 +439,9 @@ class WalletActivity : AppCompatActivity() {
         nav.labelVisibilityMode = com.google.android.material.navigation.NavigationBarView.LABEL_VISIBILITY_LABELED
         nav.itemActiveIndicatorColor = ColorStateList.valueOf(design.color(com.google.android.material.R.attr.colorSurfaceContainerHigh))
         nav.selectedItemId = screen
-        navigation = nav
         nav.setOnItemSelectedListener { item -> selectScreen(item.itemId, updateNavigation = false); true }
         nav.setOnItemReselectedListener { /* Keep the current page and scroll position. */ }
-        root.addView(nav)
+        return nav
     }
 
     private fun selectScreen(value: Int, updateNavigation: Boolean = true) {
@@ -499,6 +500,17 @@ class WalletActivity : AppCompatActivity() {
         showingLogin = true
         automaticUnlockEligible = false
         root.removeAllViews()
+        val (page, body) = loginShell()
+        val legacyCredentials = model.legacyCredentials()
+        val biometricAvailable = BiometricManager.from(this).canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG) == BiometricManager.BIOMETRIC_SUCCESS
+        if (!createAccount && !usePassword && biometricAvailable && (model.wrappedRefresh != null || legacyCredentials != null)) {
+            welcomeBack(body, page, legacyCredentials?.username.orEmpty())
+            return
+        }
+        credentialForm(page, body, createAccount, biometricAvailable, legacyCredentials?.username.orEmpty())
+    }
+
+    private fun loginShell(): Pair<LinearLayout, LinearLayout> {
         val page = column().apply { gravity = Gravity.CENTER_VERTICAL; setPadding(dp(24), dp(28), dp(24), dp(24)) }
         val body = design.column(20)
         val scroll = ScrollView(this).apply {
@@ -515,26 +527,30 @@ class WalletActivity : AppCompatActivity() {
         brand.addView(branding, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(16) })
         page.addView(brand)
         page.addView(design.card(body), LinearLayout.LayoutParams(-1, -2))
-        val legacyCredentials = model.legacyCredentials()
-        val biometricAvailable = BiometricManager.from(this).canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG) == BiometricManager.BIOMETRIC_SUCCESS
-        if (!createAccount && !usePassword && biometricAvailable && (model.wrappedRefresh != null || legacyCredentials != null)) {
-            automaticUnlockEligible = true
-            body.addView(design.text("Welcome back", 28f, ink, true))
-            body.addView(text(model.savedName.ifEmpty { legacyCredentials?.username.orEmpty() }, 16f, muted))
-            body.addView(text("Unlock to view your wallet.", 14f, muted).apply { setPadding(0, dp(8), 0, dp(20)) })
-            body.addView(button("Unlock wallet") {
-                if (model.wrappedRefresh != null) unlock() else legacyCredentials?.let { unlockLegacy(it) }
-            }.apply { setIconResource(R.drawable.ic_fingerprint) }, LinearLayout.LayoutParams(-1, -2))
-            page.addView(textButton("Use password") { login(usePassword = true) }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
-            root.post { promptAutomatically() }
-            return
-        }
+        return page to body
+    }
+
+    private fun welcomeBack(body: LinearLayout, page: LinearLayout, savedUsername: String) {
+        automaticUnlockEligible = true
+        body.addView(design.text("Welcome back", 28f, ink, true))
+        body.addView(text(model.savedName.ifEmpty { savedUsername }, 16f, muted))
+        body.addView(text("Unlock to view your wallet.", 14f, muted).apply { setPadding(0, dp(8), 0, dp(20)) })
+        body.addView(button("Unlock wallet") {
+            val legacy = model.legacyCredentials()
+            if (model.wrappedRefresh != null) unlock() else legacy?.let { unlockLegacy(it) }
+        }.apply { setIconResource(R.drawable.ic_fingerprint) }, LinearLayout.LayoutParams(-1, -2))
+        page.addView(textButton(USE_PASSWORD) { login(usePassword = true) }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
+        root.post { promptAutomatically() }
+    }
+
+    private fun credentialForm(page: LinearLayout, body: LinearLayout, createAccount: Boolean,
+                               biometricAvailable: Boolean, savedUsername: String) {
         body.addView(design.text(if (createAccount) "Create account" else "Sign in", 28f, ink, true))
         body.addView(text(if (createAccount) "Choose your account details." else "Access your synced wallet.", 14f, muted).apply {
             setPadding(0, dp(4), 0, dp(20))
         })
         val username = input(body, "Username").apply {
-            if (!createAccount) setText(model.savedName.ifEmpty { legacyCredentials?.username.orEmpty() })
+            if (!createAccount) setText(model.savedName.ifEmpty { savedUsername })
         }
         val password = input(body, "Password", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD)
         if (createAccount) (password.parent.parent as TextInputLayout).helperText = "At least 12 characters"
@@ -568,7 +584,7 @@ class WalletActivity : AppCompatActivity() {
             password.text?.clear(); login(createAccount = !createAccount, usePassword = true)
         }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
         if (!createAccount) page.addView(textButton("Continue without an account") {
-            MaterialAlertDialogBuilder(this).setTitle("Local wallet")
+            MaterialAlertDialogBuilder(this).setTitle(LOCAL_WALLET)
                 .setMessage("Only on this phone. No account or sync.")
                 .setNegativeButton("Cancel", null).setPositiveButton("Open") { _, _ -> task { model.localOnly(); render() } }.create().let(::showDialog)
         }.apply { setTextColor(muted) }, LinearLayout.LayoutParams(-1, -2))
@@ -609,7 +625,7 @@ class WalletActivity : AppCompatActivity() {
             })
             val info = BiometricPrompt.PromptInfo.Builder().setTitle("Unlock your wallet")
                 .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
-                .setNegativeButtonText("Use password").build()
+                .setNegativeButtonText(USE_PASSWORD).build()
             biometricPrompt = prompt
             prompt.authenticate(info, BiometricPrompt.CryptoObject(cipher))
         } catch (_: Exception) { unlockGate.finished(); login(usePassword = true); message("Fingerprint unavailable. Sign in again.") }
@@ -620,6 +636,9 @@ class WalletActivity : AppCompatActivity() {
         val attempt = ++biometricAttempt
         try {
             val key = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.getKey("USER_KEY", null) as SecretKey
+            // PKCS7 is the v1 wrapping format; changing it would strand pre-migration
+            // credentials. Decryption-only, one-shot, over biometric-gated key access.
+            @Suppress("S5542")
             val cipher = Cipher.getInstance("AES/CBC/PKCS7Padding").apply {
                 init(Cipher.DECRYPT_MODE, key, IvParameterSpec(android.util.Base64.decode(credentials.iv, android.util.Base64.NO_WRAP)))
             }
@@ -648,7 +667,7 @@ class WalletActivity : AppCompatActivity() {
             biometricPrompt = prompt
             prompt.authenticate(BiometricPrompt.PromptInfo.Builder().setTitle("Unlock your wallet")
                 .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
-                .setNegativeButtonText("Use password").build(), BiometricPrompt.CryptoObject(cipher))
+                .setNegativeButtonText(USE_PASSWORD).build(), BiometricPrompt.CryptoObject(cipher))
         } catch (_: Exception) { unlockGate.finished(); login(usePassword = true); message("Fingerprint unavailable. Sign in again.") }
     }
 
@@ -664,16 +683,19 @@ class WalletActivity : AppCompatActivity() {
                 legacyDataAvailable = available; pages.remove(4)
                 if (screen == 4) showScreen()
             }
-            if (snapshot == null) return@task
-            val target = if (account == "local") "Local wallet" else model.savedName
-            val details = "${snapshot.expenses} expenses · ${snapshot.categories} categories" +
-                (if (snapshot.reviewCount > 0) "\n${snapshot.reviewCount} need review" else "") +
-                (if (snapshot.retainedOtherRows > 0) "\n${snapshot.retainedOtherRows} other records archived" else "")
-            MaterialAlertDialogBuilder(this@WalletActivity).setTitle("Move local data to $target?")
-                .setMessage(details).setNegativeButton("Not now", null)
-                .setPositiveButton("Move") { _, _ -> task { model.migrateLegacy(snapshot); render() } }
-                .create().let(::showDialog)
+            if (snapshot != null) offerMigrationDialog(snapshot)
         }
+    }
+
+    private fun offerMigrationDialog(snapshot: LegacyUpgrade.Snapshot) {
+        val target = if (model.account == "local") LOCAL_WALLET else model.savedName
+        val details = "${snapshot.expenses} expenses · ${snapshot.categories} categories" +
+            (if (snapshot.reviewCount > 0) "\n${snapshot.reviewCount} need review" else "") +
+            (if (snapshot.retainedOtherRows > 0) "\n${snapshot.retainedOtherRows} other records archived" else "")
+        MaterialAlertDialogBuilder(this@WalletActivity).setTitle("Move local data to $target?")
+            .setMessage(details).setNegativeButton("Not now", null)
+            .setPositiveButton("Move") { _, _ -> task { model.migrateLegacy(snapshot); render() } }
+            .create().let(::showDialog)
     }
 
     private fun money(minor: Long, currency: String = "EUR"): String = NumberFormat.getCurrencyInstance().apply {
@@ -805,11 +827,23 @@ class WalletActivity : AppCompatActivity() {
             val index = position - 1
             val row = rows[index]; val payload = row.getJSONObject("payload")
             if (index == 0 || groupKey(rows[index - 1]) != groupKey(row)) holder.box.addView(groupHeader(groupKey(row)))
+            val cardBody = design.column(16).apply { addView(recordLine(row, payload)) }
+            if (row.getString("kind") == "debt") cardBody.addView(paidToggle(row))
+            if (row.optBoolean("has_conflict") || row.optBoolean("needs_review")) cardBody.addView(design.pill("Needs review",
+                design.color(com.google.android.material.R.attr.colorTertiaryContainer), design.color(com.google.android.material.R.attr.colorOnTertiaryContainer)))
+            holder.box.addView(design.card(cardBody, radius = 20).apply {
+                contentDescription = cardAccessibilityText(row, payload)
+                setOnClickListener {
+                    when { row.optBoolean("has_conflict") -> conflict(row); row.getString("kind") == "bill" -> billDetails(row); else -> editor(row.getString("kind"), row) }
+                }
+            })
+        }
+
+        private fun recordLine(row: JSONObject, payload: JSONObject): LinearLayout {
             val line = LinearLayout(this@WalletActivity).apply { gravity = Gravity.CENTER_VERTICAL }
             if (row.getString("kind") != "debt") {
                 line.addView(design.badge(if (row.getString("kind") == "bill") R.drawable.wallet_ic_people else R.drawable.wallet_ic_expense))
             }
-            val paid = row.getString("kind") == "debt" && payload.optBoolean("paid")
             // Grouping already names the person; debt rows describe what the debt is for.
             val title = when (row.getString("kind")) {
                 "debt" -> payload.optString("description").ifEmpty { payload.optString("person") }
@@ -820,45 +854,47 @@ class WalletActivity : AppCompatActivity() {
                 "debt" -> displayDay(payload.optString("date"))
                 else -> categoryName(payload.optString("category_id"))
             }
-            val debtPaid = paid
-            val titleColor = if (debtPaid) muted else ink
+            val settled = row.getString("kind") == "debt" && payload.optBoolean("paid")
+            val titleColor = if (settled) muted else ink
             val labels = design.column()
             labels.addView(design.text(title, 16f, titleColor, true).apply {
                 maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END
-                if (debtPaid) paintFlags = paintFlags or Paint.STRIKE_THRU_TEXT_FLAG
+                if (settled) paintFlags = paintFlags or Paint.STRIKE_THRU_TEXT_FLAG
             })
             labels.addView(text(detail, 12f, muted).apply { maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END })
             val amount = money(payload.optLong("amount_minor"), payload.optString("currency", "EUR"))
             val largeText = resources.configuration.fontScale >= 1.3f || resources.configuration.screenWidthDp < 360
             val amountView = design.text(amount, if (largeText) 20f else 18f, titleColor, true).apply {
-                if (debtPaid) paintFlags = paintFlags or Paint.STRIKE_THRU_TEXT_FLAG
+                if (settled) paintFlags = paintFlags or Paint.STRIKE_THRU_TEXT_FLAG
                 if (!largeText) setPadding(dp(8), 0, 0, 0)
             }
             if (largeText) labels.addView(amountView)
             line.addView(labels, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(12) })
             if (!largeText) line.addView(amountView)
-            val cardBody = design.column(16).apply { addView(line) }
-            if (row.getString("kind") == "debt") {
-                if (paid) cardBody.addView(textButton("Mark unpaid") {
-                    val updated = JSONObject(row.getJSONObject("payload").toString())
-                    updated.remove("paid"); updated.remove("paid_date")
-                    model.store!!.save("debt", updated, row); model.changed(); render()
-                }.apply { textSize = 13f })
-                else cardBody.addView(textButton("Mark paid") {
-                    val updated = JSONObject(row.getJSONObject("payload").toString()).put("paid", true)
-                        .put("paid_date", SimpleDateFormat(ISO_DATE, Locale.US).format(Date()))
-                    model.store!!.save("debt", updated, row); model.changed(); render()
-                }.apply { textSize = 13f })
+            return line
+        }
+
+        private fun paidToggle(row: JSONObject) = textButton(if (row.getJSONObject("payload").optBoolean("paid")) "Mark unpaid" else "Mark paid") {
+            val updated = JSONObject(row.getJSONObject("payload").toString())
+            if (updated.optBoolean("paid")) { updated.remove("paid"); updated.remove("paid_date") }
+            else updated.put("paid", true).put("paid_date", SimpleDateFormat(ISO_DATE, Locale.US).format(Date()))
+            model.store!!.save("debt", updated, row); model.changed(); render()
+        }.apply { textSize = 13f }
+
+        private fun cardAccessibilityText(row: JSONObject, payload: JSONObject): String {
+            val settled = row.getString("kind") == "debt" && payload.optBoolean("paid")
+            val title = when (row.getString("kind")) {
+                "debt" -> payload.optString("description").ifEmpty { payload.optString("person") }
+                else -> payload.optString("description")
             }
-            if (row.optBoolean("has_conflict") || row.optBoolean("needs_review")) cardBody.addView(design.pill("Needs review",
-                design.color(com.google.android.material.R.attr.colorTertiaryContainer), design.color(com.google.android.material.R.attr.colorOnTertiaryContainer)))
-            val state = if (row.getString("kind") == "debt") if (paid) " Paid" else " Unpaid" else ""
-            holder.box.addView(design.card(cardBody, radius = 20).apply {
-                contentDescription = "$title, $detail, $amount.$state"
-                setOnClickListener {
-                    when { row.optBoolean("has_conflict") -> conflict(row); row.getString("kind") == "bill" -> billDetails(row); else -> editor(row.getString("kind"), row) }
-                }
-            })
+            val detail = when (row.getString("kind")) {
+                "bill" -> "${payload.optJSONArray("participants")?.length() ?: 0} people · paid by ${payload.optString("paid_by")}"
+                "debt" -> displayDay(payload.optString("date"))
+                else -> categoryName(payload.optString("category_id"))
+            }
+            val amount = money(payload.optLong("amount_minor"), payload.optString("currency", "EUR"))
+            val state = if (row.getString("kind") == "debt") if (settled) " Paid" else " Unpaid" else ""
+            return "$title, $detail, $amount.$state"
         }
     }
 
@@ -1022,28 +1058,40 @@ class WalletActivity : AppCompatActivity() {
         dialog = formDialog(if (row == null) ADD_DEBT else "Edit debt", body, if (row == null) ADD_DEBT else "Save") {
             try {
                 formError.text = ""; amount.error = null; person.error = null
-                val minor = BillSplitter.amount(amount.text.toString())
-                val who = person.text.toString().trim(); require(who.isNotEmpty() && who.length <= 80) { "Enter a person (1–80 characters)" }
-                val note = description.text.toString().trim()
-                if (note.isNotEmpty()) require(note.length <= 255) { "Description up to 255 characters" }
-                require(dates.confirmed) { "Choose a date" }
-                require(dates.validSelectedDay()) { "Enter a valid YYYY-MM-DD date" }
-                val known = existingPerson(who)
-                val personRow = known ?: model.store!!.save("person", JSONObject().put("name", who))
-                val payload = JSONObject().put("person_id", personRow.getString("id"))
-                    .put("person", personRow.getJSONObject("payload").getString("name"))
-                    .put("amount_minor", minor).put("currency", currency.text.toString()).put("date", dates.day)
-                    .put("description", note).put("paid", paid.isChecked)
-                if (paid.isChecked) payload.put("paid_date", old?.optString("paid_date") ?: dates.day)
+                val payload = debtPayload(amount, person, description, dates, currency, paid.isChecked, old)
                 model.store!!.save("debt", payload, row); model.changed(); render(); dialog.dismiss()
             } catch (error: Exception) {
-                formError.text = error.message ?: "Check the form"
-                if (runCatching { BillSplitter.amount(amount.text.toString()) }.isFailure) amount.error = formError.text
-                if (person.text.toString().trim().isEmpty()) person.error = "Enter a person"
-                formError.requestRectangleOnScreen(android.graphics.Rect(0, 0, formError.width, formError.height), true)
+                applyDebtFormError(formError, amount, person, error)
             }
         }
         showDialog(dialog)
+    }
+
+    /** Validates the debt form and builds its payload; throws with a readable message. */
+    private fun debtPayload(amount: TextInputEditText, person: MaterialAutoCompleteTextView, description: TextInputEditText,
+                            dates: DateState, currency: MaterialAutoCompleteTextView, paid: Boolean,
+                            old: JSONObject?): JSONObject {
+        val minor = BillSplitter.amount(amount.text.toString())
+        val who = person.text.toString().trim(); require(who.isNotEmpty() && who.length <= 80) { "Enter a person (1–80 characters)" }
+        val note = description.text.toString().trim()
+        if (note.isNotEmpty()) require(note.length <= 255) { "Description up to 255 characters" }
+        require(dates.confirmed) { "Choose a date" }
+        require(dates.validSelectedDay()) { "Enter a valid YYYY-MM-DD date" }
+        val known = existingPerson(who)
+        val personRow = known ?: model.store!!.save("person", JSONObject().put("name", who))
+        val payload = JSONObject().put("person_id", personRow.getString("id"))
+            .put("person", personRow.getJSONObject("payload").getString("name"))
+            .put("amount_minor", minor).put("currency", currency.text.toString()).put("date", dates.day)
+            .put("description", note).put("paid", paid)
+        if (paid) payload.put("paid_date", old?.optString("paid_date") ?: dates.day)
+        return payload
+    }
+
+    private fun applyDebtFormError(formError: TextView, amount: TextInputEditText, person: MaterialAutoCompleteTextView, error: Exception) {
+        formError.text = error.message ?: "Check the form"
+        if (runCatching { BillSplitter.amount(amount.text.toString()) }.isFailure) amount.error = formError.text
+        if (person.text.toString().trim().isEmpty()) person.error = "Enter a person"
+        formError.requestRectangleOnScreen(android.graphics.Rect(0, 0, formError.width, formError.height), true)
     }
 
     private fun stageDelete(row: JSONObject) {
@@ -1106,24 +1154,7 @@ class WalletActivity : AppCompatActivity() {
         fun version(title: String, record: JSONObject?) {
             val card = MaterialCardView(this).apply { radius = dp(16).toFloat() }
             val detail = column(); detail.addView(text(title, 12f, muted))
-            if (record == null || record.optBoolean("deleted")) detail.addView(text("Deleted", 20f))
-            else {
-                val payload = record.getJSONObject("payload")
-                detail.addView(text(payload.optString("description", payload.optString("name")), 18f))
-                if (payload.has("amount_minor")) detail.addView(text(money(payload.getLong("amount_minor"), payload.optString("currency", "EUR")), 24f, primary))
-                if (payload.has("date")) detail.addView(text(payload.getString("date"), 12f, muted))
-                if (payload.has("category_id")) detail.addView(text(categoryName(payload.getString("category_id")), 12f, muted))
-                payload.optJSONArray("participants")?.let { people ->
-                    detail.addView(text((0 until people.length()).joinToString(", ") { people.getString(it) }, 14f))
-                    detail.addView(text("Paid by ${payload.optString("paid_by")}", 12f, muted))
-                    payload.optJSONArray("extras")?.let { extras ->
-                        for (index in 0 until extras.length()) {
-                            val extra = extras.getJSONObject(index)
-                            detail.addView(text("${extra.optString("description").ifEmpty { "Extra" }} · ${extra.optString("participant")} · ${money(extra.optLong("amount_minor"), payload.optString("currency", "EUR"))}", 12f, muted))
-                        }
-                    }
-                }
-            }
+            detail.addView(recordDetail(record))
             card.addView(detail); body.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
         }
         version("THIS DEVICE", row); version("ONLINE", remote)
@@ -1133,16 +1164,47 @@ class WalletActivity : AppCompatActivity() {
             .setPositiveButton("Keep local") { _, _ -> model.store!!.resolve(row, true); model.changed(); render() }.create().let(::showDialog)
     }
 
+    private fun recordDetail(record: JSONObject?): LinearLayout {
+        val detail = column()
+        if (record == null || record.optBoolean("deleted")) { detail.addView(text("Deleted", 20f)); return detail }
+        val payload = record.getJSONObject("payload")
+        detail.addView(text(payload.optString("description", payload.optString("name")), 18f))
+        if (payload.has("amount_minor")) detail.addView(text(money(payload.getLong("amount_minor"), payload.optString("currency", "EUR")), 24f, primary))
+        if (payload.has("date")) detail.addView(text(payload.getString("date"), 12f, muted))
+        if (payload.has("category_id")) detail.addView(text(categoryName(payload.getString("category_id")), 12f, muted))
+        payload.optJSONArray("participants")?.let { people ->
+            detail.addView(text((0 until people.length()).joinToString(", ") { people.getString(it) }, 14f))
+            detail.addView(text("Paid by ${payload.optString("paid_by")}", 12f, muted))
+            payload.optJSONArray("extras")?.let { extras ->
+                for (index in 0 until extras.length()) {
+                    val extra = extras.getJSONObject(index)
+                    detail.addView(text("${extra.optString("description").ifEmpty { "Extra" }} · ${extra.optString("participant")} · ${money(extra.optLong("amount_minor"), payload.optString("currency", "EUR"))}", 12f, muted))
+                }
+            }
+        }
+        return detail
+    }
+
     private fun settings() {
         val scroll = ScrollView(this); val body = column().apply { setPadding(0, 0, 0, dp(16)) }; scroll.addView(body); content.addView(scroll)
         scroll.post { scroll.scrollTo(0, settingsScrollY) }
-        val identity = design.column(20).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        identity.addView(design.badge(R.drawable.wallet_ic_wallet, 52))
-        identity.addView(design.column().apply {
-            addView(design.text(if (model.account == "local") "Local wallet" else model.savedName, 21f, ink, true))
+        body.addView(design.card(identityCard(), design.cardSurface))
+        settingsWalletSection(body)
+        settingsAttentionSection(body)
+        settingsPrivacySection(body)
+        settingsDataSection(body)
+    }
+
+    private fun identityCard() = design.column(20).apply {
+        orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+        addView(design.badge(R.drawable.wallet_ic_wallet, 52))
+        addView(design.column().apply {
+            addView(design.text(if (model.account == "local") LOCAL_WALLET else model.savedName, 21f, ink, true))
             addView(text(if (model.account == "local") "Only on this phone" else "Account wallet", 13f, muted))
         }, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(16) })
-        body.addView(design.card(identity, design.cardSurface))
+    }
+
+    private fun settingsWalletSection(body: LinearLayout) {
         body.addView(design.heading("Wallet"))
         val categoryCount = categoryRows().size
         val walletRows = mutableListOf<View>(design.actionRow("Categories", "$categoryCount ${if (categoryCount == 1) "category" else "categories"} · organize your expenses", R.drawable.wallet_ic_category) { categories() })
@@ -1152,9 +1214,13 @@ class WalletActivity : AppCompatActivity() {
         body.addView(design.group(*walletRows.toTypedArray()))
         settingsStatus = text(if (model.account == "local") "This wallet stays on your phone. It doesn't sync." else model.status.value, 13f, muted).apply { setPadding(dp(16), 0, dp(16), dp(4)) }
         body.addView(settingsStatus)
+    }
+
+    private fun settingsAttentionSection(body: LinearLayout) {
         val conflicts = allRows.filter { it.optBoolean("has_conflict") }
         val review = visibleRows.filter { it.optBoolean("needs_review") }
-        if (conflicts.isNotEmpty() || review.isNotEmpty()) body.addView(design.heading("Needs your attention"))
+        if (conflicts.isEmpty() && review.isEmpty()) return
+        body.addView(design.heading("Needs your attention"))
         conflicts.forEach { row -> body.addView(design.group(design.actionRow(
             row.getJSONObject("payload").optString("description", row.getJSONObject("payload").optString("name", "Deleted record")),
             "Choose which version to keep", R.drawable.wallet_ic_sync) { conflict(row) })) }
@@ -1164,6 +1230,9 @@ class WalletActivity : AppCompatActivity() {
                 if (row.getString("kind") == "category") categoryEditor(row) else editor(row.getString("kind"), row)
             }))
         }
+    }
+
+    private fun settingsPrivacySection(body: LinearLayout) {
         body.addView(design.heading("Privacy"))
         val privacyRows = mutableListOf<View>(design.actionRow(if (model.account == "local") "Close wallet" else "Lock wallet",
             if (model.account == "local") "Hide this wallet from the screen" else "Locks automatically when you leave the app", R.drawable.wallet_ic_lock) {
@@ -1171,6 +1240,9 @@ class WalletActivity : AppCompatActivity() {
         })
         if (model.account != "local") privacyRows.add(design.actionRow("Sign out", "Remove this device's saved session", R.drawable.wallet_ic_logout) { signOut() })
         body.addView(design.group(*privacyRows.toTypedArray()))
+    }
+
+    private fun settingsDataSection(body: LinearLayout) {
         body.addView(design.heading("Data"))
         val dataRows = mutableListOf<View>()
         if (legacyDataAvailable) dataRows.add(design.actionRow("Import previous wallet data", "Move records from the older app", R.drawable.wallet_ic_wallet) {

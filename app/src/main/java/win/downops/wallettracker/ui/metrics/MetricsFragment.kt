@@ -52,7 +52,9 @@ class MetricsFragment : Fragment() {
                     viewModel.setFilter(selectedCatId, viewModel.selectedMonthKey)
                 }
             }
-            override fun onNothingSelected(parent: AdapterView<*>) {}
+            override fun onNothingSelected(parent: AdapterView<*>) {
+                // Intentionally empty: keeping the current category filter when nothing is picked
+            }
         }
 
         binding.spinnerMonth.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
@@ -63,7 +65,9 @@ class MetricsFragment : Fragment() {
                     viewModel.setFilter(viewModel.selectedCategoryId, selectedMonthKey)
                 }
             }
-            override fun onNothingSelected(parent: AdapterView<*>) {}
+            override fun onNothingSelected(parent: AdapterView<*>) {
+                // Intentionally empty: keeping the current month filter when nothing is picked
+            }
         }
     }
 

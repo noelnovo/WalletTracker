@@ -36,9 +36,9 @@ class RViewExpensesAdapter(var list: MutableList<Expense>) : RecyclerView.Adapte
     @RequiresApi(Build.VERSION_CODES.O)
     override fun onBindViewHolder(holder: ExpenseViewHolder, position: Int) {
         holder.expensePrice.text = String.format("%.2f", list[position].getPrice())+"€"
-        val format = SimpleDateFormat("EEEE dd 'de' MMMM 'del' yyyy", Locale("es", "ES"))
+        val format = SimpleDateFormat("EEEE dd 'de' MMMM 'del' yyyy", Locale.forLanguageTag("es-ES"))
         holder.expenseDate.text = format.format(list[position].getDate())
-        val desc = list[position].getDescription()
+        val desc = list[position].description
         if (desc.isNullOrEmpty()) {
             holder.expenseDescription.visibility = View.GONE
         } else if (desc.length > 20) {
@@ -49,7 +49,7 @@ class RViewExpensesAdapter(var list: MutableList<Expense>) : RecyclerView.Adapte
 
 
         holder.itemView.setOnClickListener {
-            val expenseId = list[position].getId()
+            val expenseId = list[position].id
             val categoryId = list[position].getCategoryId()
             val bundle = Bundle()
             bundle.putLong("catId", categoryId)
@@ -71,7 +71,7 @@ class RViewExpensesAdapter(var list: MutableList<Expense>) : RecyclerView.Adapte
     }
 
     @SuppressLint("NotifyDataSetChanged")
-    fun updateData(expenses: MutableList<Expense>) {
+    fun updateData(expenses: List<Expense>) {
         list.clear()
         list.addAll(expenses)
         notifyDataSetChanged()

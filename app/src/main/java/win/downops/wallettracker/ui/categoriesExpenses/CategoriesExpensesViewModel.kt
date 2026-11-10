@@ -52,7 +52,7 @@ class CategoriesExpensesViewModel @Inject constructor(
             val month = cal.get(Calendar.MONTH) + 1
             val seasonResult = seasonRepo.getByYearMonth(year, month)
             if (seasonResult is AppResult.Success && seasonResult.data != null) {
-                val seasonExpenses = expenseRepo.getBySeasonId(seasonResult.data!!.getId())
+                val seasonExpenses = expenseRepo.getBySeasonId(seasonResult.data.id)
                 if (seasonExpenses is AppResult.Success) {
                     val filtered = seasonExpenses.data.filter { it.getCategoryId() == categoryId }
                     _getExpensesByCategoryIdResult.postValue(AppResult.Success("Expenses fetched", filtered))

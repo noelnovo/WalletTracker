@@ -5,37 +5,33 @@ import java.text.SimpleDateFormat
 import java.util.Locale
 
 class Expense {
-    private var id: Long = 0
+    private var _id: Long = 0
     private var price: Double? = null
-    private var description: String = ""
+    private var _description: String = ""
     private var expenseDate: Date? = null
     private var category: Long? = null
-    private var seasonId: Long? = null
+    private var _seasonId: Long? = null
     constructor()
     constructor(id:Long, price: Double?, expenseDate: Date?, category: Long?, description: String) {
-        this.id = id
+        this._id = id
         this.price = price
         this.expenseDate = expenseDate
         this.category = category
-        this.description = description
+        this._description = description
     }
     constructor(price: Double?, expenseDate: Date?, category: Long?, description: String) {
         this.price = price
         this.expenseDate = expenseDate
         this.category = category
-        this.description = description
+        this._description = description
     }
     constructor(id: Long) {
-        this.id = id
+        this._id = id
     }
-    fun getId(): Long{
-        return this.id
-    }
-    fun getDescription(): String{
-        return this.description
-    }
+    val id: Long get() = _id
+    val description: String get() = _description
     fun setDescription(value: String){
-        this.description = value
+        this._description = value
     }
 
     fun getPrice(): Double{
@@ -61,6 +57,6 @@ class Expense {
     fun setCategoryId(value: Long){
         this.category = value
     }
-    fun getSeasonId(): Long? = seasonId
-    fun setSeasonId(value: Long) { seasonId = value }
+    val seasonId: Long? get() = _seasonId
+    fun setSeasonId(value: Long) { _seasonId = value }
 }

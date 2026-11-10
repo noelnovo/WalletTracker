@@ -40,8 +40,8 @@ class CategoriesViewModel @Inject constructor(
         }
 
         val categories = categoriesResult.data.map { cat ->
-            ExpenseCategory(cat.getId()).apply {
-                setName(cat.getName())
+            ExpenseCategory(cat.id).apply {
+                setName(cat.name)
                 setOrder(cat.getOrder())
                 setTotal(0.0)
             }
@@ -55,12 +55,12 @@ class CategoriesViewModel @Inject constructor(
 
         val seasonResult = seasonRepo.getByYearMonth(year, month)
         if (seasonResult is AppResult.Success && seasonResult.data != null) {
-            val expensesResult = expenseRepo.getBySeasonId(seasonResult.data!!.getId())
+            val expensesResult = expenseRepo.getBySeasonId(seasonResult.data.id)
             if (expensesResult is AppResult.Success) {
                 val totals = expensesResult.data
                     .groupBy { it.getCategoryId() }
                     .mapValues { (_, list) -> list.sumOf { it.getPrice() } }
-                categories.forEach { cat -> cat.setTotal(totals[cat.getId()] ?: 0.0) }
+                categories.forEach { cat -> cat.setTotal(totals[cat.id] ?: 0.0) }
             }
         }
 

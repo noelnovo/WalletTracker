@@ -18,6 +18,9 @@ import win.downops.wallettracker.data.models.AppResult
 import win.downops.wallettracker.data.models.Expense
 import win.downops.wallettracker.data.api.communication.responses.BaseResponse
 
+private const val DATE_FORMAT = "yyyy-MM-dd"
+private const val NO_DATA = "No data"
+
 @RequiresApi(Build.VERSION_CODES.O)
 class ExpenseHttpService @Inject constructor(
     sessionRepository: SessionRepository
@@ -28,7 +31,7 @@ class ExpenseHttpService @Inject constructor(
         return safeCipheredApiCall(
             call = { ApiClient.expense.getById("Bearer ${getToken()}", getCipheredText(), encryptData(ExpenseIdRequest(expenseId)) ?: throw Exception(authenticationErrorMessage)) },
             parser = { json ->
-                val parsed = GsonBuilder().setDateFormat("yyyy-MM-dd").create()
+                val parsed = GsonBuilder().setDateFormat(DATE_FORMAT).create()
                     .fromJson(json, object : com.google.gson.reflect.TypeToken<BaseResponse<Expense?>>() {}.type) as BaseResponse<Expense?>
                 if (parsed.success) AppResult.Success(parsed.message, parsed.data)
                 else AppResult.Error(parsed.message)
@@ -40,7 +43,7 @@ class ExpenseHttpService @Inject constructor(
         return safeCipheredApiCall(
             call = { ApiClient.expense.getBySeasonId("Bearer ${getToken()}", getCipheredText(), encryptData(ExpenseBySeasonIdRequest(seasonId)) ?: throw Exception(authenticationErrorMessage)) },
             parser = { json ->
-                val parsed = GsonBuilder().setDateFormat("yyyy-MM-dd").create()
+                val parsed = GsonBuilder().setDateFormat(DATE_FORMAT).create()
                     .fromJson(json, object : com.google.gson.reflect.TypeToken<BaseResponse<List<Expense>>>() {}.type) as BaseResponse<List<Expense>>
                 if (parsed.success) AppResult.Success(parsed.message, parsed.data ?: emptyList())
                 else AppResult.Error(parsed.message)
@@ -52,7 +55,7 @@ class ExpenseHttpService @Inject constructor(
         return safeCipheredApiCall(
             call = { ApiClient.expense.getByCatId("Bearer ${getToken()}", getCipheredText(), encryptData(ExpenseByCategoryIdRequest(catId)) ?: throw Exception(authenticationErrorMessage)) },
             parser = { json ->
-                val parsed = GsonBuilder().setDateFormat("yyyy-MM-dd").create()
+                val parsed = GsonBuilder().setDateFormat(DATE_FORMAT).create()
                     .fromJson(json, object : com.google.gson.reflect.TypeToken<BaseResponse<List<Expense>>>() {}.type) as BaseResponse<List<Expense>>
                 if (parsed.success) AppResult.Success(parsed.message, parsed.data ?: emptyList())
                 else AppResult.Error(parsed.message)
@@ -62,9 +65,9 @@ class ExpenseHttpService @Inject constructor(
 
     override suspend fun create(expense: Expense): AppResult<Expense?> {
         return safeCipheredApiCall(
-            call = { ApiClient.expense.create("Bearer ${getToken()}", getCipheredText(), encryptData(CreateExpenseRequest(expense.getPrice(), expense.getDateString(), expense.getCategoryId(), expense.getDescription())) ?: throw Exception(authenticationErrorMessage)) },
+            call = { ApiClient.expense.create("Bearer ${getToken()}", getCipheredText(), encryptData(CreateExpenseRequest(expense.getPrice(), expense.getDateString(), expense.getCategoryId(), expense.description)) ?: throw Exception(authenticationErrorMessage)) },
             parser = { json ->
-                val parsed = GsonBuilder().setDateFormat("yyyy-MM-dd").create()
+                val parsed = GsonBuilder().setDateFormat(DATE_FORMAT).create()
                     .fromJson(json, object : com.google.gson.reflect.TypeToken<BaseResponse<Expense?>>() {}.type) as BaseResponse<Expense?>
                 if (parsed.success) AppResult.Success(parsed.message, parsed.data)
                 else AppResult.Error(parsed.message)
@@ -74,9 +77,9 @@ class ExpenseHttpService @Inject constructor(
 
     override suspend fun edit(expense: Expense): AppResult<Expense?> {
         return safeCipheredApiCall(
-            call = { ApiClient.expense.edit("Bearer ${getToken()}", getCipheredText(), encryptData(EditExpenseRequest(expense.getId(), expense.getPrice(), expense.getDateString(), expense.getCategoryId(), expense.getDescription())) ?: throw Exception(authenticationErrorMessage)) },
+            call = { ApiClient.expense.edit("Bearer ${getToken()}", getCipheredText(), encryptData(EditExpenseRequest(expense.id, expense.getPrice(), expense.getDateString(), expense.getCategoryId(), expense.description)) ?: throw Exception(authenticationErrorMessage)) },
             parser = { json ->
-                val parsed = GsonBuilder().setDateFormat("yyyy-MM-dd").create()
+                val parsed = GsonBuilder().setDateFormat(DATE_FORMAT).create()
                     .fromJson(json, object : com.google.gson.reflect.TypeToken<BaseResponse<Expense?>>() {}.type) as BaseResponse<Expense?>
                 if (parsed.success) AppResult.Success(parsed.message, parsed.data)
                 else AppResult.Error(parsed.message)
@@ -95,12 +98,12 @@ class ExpenseHttpService @Inject constructor(
                     currentSession.token = newToken
                     sessionRepository.edit(currentSession)
                     val retryResponse = ApiClient.expense.deleteById("Bearer ${newToken}", getCipheredText(), encryptData(ExpenseIdRequest(expenseId)) ?: throw Exception(authenticationErrorMessage))
-                    val body = retryResponse.body() ?: return AppResult.Error("No data", code = retryResponse.code())
+                    val body = retryResponse.body() ?: return AppResult.Error(NO_DATA, code = retryResponse.code())
                     return if (body.success) AppResult.Success(body.message, Unit) else AppResult.Error(body.message, code = retryResponse.code())
                 }
             }
         }
-        val body = response.body() ?: return AppResult.Error("No data", code = response.code())
+        val body = response.body() ?: return AppResult.Error(NO_DATA, code = response.code())
         return if (body.success) AppResult.Success(body.message, Unit) else AppResult.Error(body.message, code = response.code())
     }
 
@@ -115,12 +118,12 @@ class ExpenseHttpService @Inject constructor(
                      currentSession.token = newToken
                      sessionRepository.edit(currentSession)
                      val retryResponse = ApiClient.expense.deleteAll("Bearer ${newToken}", getCipheredText())
-                     val body = retryResponse.body() ?: return AppResult.Error("No data", code = retryResponse.code())
+                     val body = retryResponse.body() ?: return AppResult.Error(NO_DATA, code = retryResponse.code())
                      return if (body.success) AppResult.Success(body.message, Unit) else AppResult.Error(body.message, code = retryResponse.code())
                  }
              }
         }
-        val body = response.body() ?: return AppResult.Error("No data", code = response.code())
+        val body = response.body() ?: return AppResult.Error(NO_DATA, code = response.code())
         return if (body.success) AppResult.Success(body.message, Unit) else AppResult.Error(body.message, code = response.code())
     }
 }

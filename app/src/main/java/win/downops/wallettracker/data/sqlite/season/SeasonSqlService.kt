@@ -16,6 +16,8 @@ import win.downops.wallettracker.data.sqlite.DatabaseHelper
 import java.io.Closeable
 import java.sql.SQLException
 
+private const val DATABASE_NOT_AVAILABLE = "Database not available"
+
 class SeasonSqlService @Inject constructor(
     @ApplicationContext context: Context?
 ) : Closeable, SeasonRepository {
@@ -40,7 +42,7 @@ class SeasonSqlService @Inject constructor(
         try {
             val list = mutableListOf<Season>()
             val cursor = database?.query("Season", null, null, null, null, null, "year DESC, month DESC")
-                ?: return@withContext AppResult.Error("Database not available", isControlled = true)
+                ?: return@withContext AppResult.Error(DATABASE_NOT_AVAILABLE, isControlled = true)
             cursor.use {
                 while (it.moveToNext()) {
                     list.add(mapCursor(it))
@@ -55,11 +57,10 @@ class SeasonSqlService @Inject constructor(
     override suspend fun getById(seasonId: Long): AppResult<Season?> = withContext(Dispatchers.IO) {
         try {
             val cursor = database?.query("Season", null, "id = ?", arrayOf(seasonId.toString()), null, null, null)
-                ?: return@withContext AppResult.Error("Database not available", isControlled = true)
-            var season: Season? = null
-            cursor.use { if (it.moveToFirst()) season = mapCursor(it) }
+                ?: return@withContext AppResult.Error(DATABASE_NOT_AVAILABLE, isControlled = true)
+            val season = cursor.use { if (it.moveToFirst()) mapCursor(it) else null }
             if (season == null) return@withContext AppResult.Error("Season not found", isControlled = true)
-            AppResult.Success("Season fetched successfully", season!!)
+            AppResult.Success("Season fetched successfully", season)
         } catch (e: Exception) {
             AppResult.Error(e.message ?: "Unexpected error fetching season", isControlled = false, e.stackTrace.joinToString("\n"))
         }
@@ -68,7 +69,7 @@ class SeasonSqlService @Inject constructor(
     override suspend fun getByYearMonth(year: Int, month: Int): AppResult<Season?> = withContext(Dispatchers.IO) {
         try {
             val cursor = database?.query("Season", null, "year = ? AND month = ?", arrayOf(year.toString(), month.toString()), null, null, null)
-                ?: return@withContext AppResult.Error("Database not available", isControlled = true)
+                ?: return@withContext AppResult.Error(DATABASE_NOT_AVAILABLE, isControlled = true)
             var season: Season? = null
             cursor.use { if (it.moveToFirst()) season = mapCursor(it) }
             AppResult.Success("Season fetched successfully", season)
@@ -88,7 +89,7 @@ class SeasonSqlService @Inject constructor(
                 put("month", month)
             }
             val rowId = database?.insert("Season", null, values)
-                ?: return@withContext AppResult.Error("Database not available", isControlled = true)
+                ?: return@withContext AppResult.Error(DATABASE_NOT_AVAILABLE, isControlled = true)
             if (rowId == -1L) return@withContext AppResult.Error("Failed to create season", isControlled = true)
             AppResult.Success("Season created successfully", Season(rowId, year, month))
         } catch (e: Exception) {
@@ -99,7 +100,7 @@ class SeasonSqlService @Inject constructor(
     override suspend fun deleteById(seasonId: Long): AppResult<Unit> = withContext(Dispatchers.IO) {
         try {
             val rowsDeleted = database?.delete("Season", "id = ?", arrayOf(seasonId.toString()))
-                ?: return@withContext AppResult.Error("Database not available", isControlled = true)
+                ?: return@withContext AppResult.Error(DATABASE_NOT_AVAILABLE, isControlled = true)
             if (rowsDeleted == 0) return@withContext AppResult.Error("Season not found", isControlled = true)
             AppResult.Success("Season deleted successfully", Unit)
         } catch (e: Exception) {

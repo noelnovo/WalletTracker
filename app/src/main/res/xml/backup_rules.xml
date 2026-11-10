@@ -11,8 +11,4 @@
     <exclude domain="sharedpref" path="." />
     <exclude domain="file" path="." />
     <exclude domain="external" path="." />
-    <!--
-   <include domain="sharedpref" path="."/>
-   <exclude domain="sharedpref" path="device.xml"/>
--->
 </full-backup-content>

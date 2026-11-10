@@ -17,6 +17,8 @@ import win.downops.wallettracker.data.models.AppResult
 import win.downops.wallettracker.data.models.Importe
 import win.downops.wallettracker.util.Messages.authenticationErrorMessage
 
+private const val DATE_FORMAT = "yyyy-MM-dd"
+
 @RequiresApi(Build.VERSION_CODES.O)
 class ImporteHttpService @Inject constructor(
     sessionRepository: SessionRepository
@@ -26,7 +28,7 @@ class ImporteHttpService @Inject constructor(
         return safeCipheredApiCall(
             call = { token -> ApiClient.importe.getBySeasonId("Bearer $token", getCipheredText(), encryptData(ImporteBySeasonIdRequest(seasonId)) ?: throw Exception(authenticationErrorMessage)) },
             parser = { json ->
-                val parsed = GsonBuilder().setDateFormat("yyyy-MM-dd").create()
+                val parsed = GsonBuilder().setDateFormat(DATE_FORMAT).create()
                     .fromJson<BaseResponse<List<Importe>>>(json, object : TypeToken<BaseResponse<List<Importe>>>() {}.type)
                 if (parsed.success) AppResult.Success(parsed.message, parsed.data ?: emptyList())
                 else AppResult.Error(parsed.message)
@@ -38,7 +40,7 @@ class ImporteHttpService @Inject constructor(
         return safeCipheredApiCall(
             call = { token -> ApiClient.importe.getById("Bearer $token", getCipheredText(), encryptData(ImporteIdRequest(importeId)) ?: throw Exception(authenticationErrorMessage)) },
             parser = { json ->
-                val parsed = GsonBuilder().setDateFormat("yyyy-MM-dd").create()
+                val parsed = GsonBuilder().setDateFormat(DATE_FORMAT).create()
                     .fromJson<BaseResponse<Importe?>>(json, object : TypeToken<BaseResponse<Importe?>>() {}.type)
                 if (parsed.success) AppResult.Success(parsed.message, parsed.data)
                 else AppResult.Error(parsed.message)
@@ -48,9 +50,9 @@ class ImporteHttpService @Inject constructor(
 
     override suspend fun create(importe: Importe): AppResult<Importe?> {
         return safeCipheredApiCall(
-            call = { token -> ApiClient.importe.create("Bearer $token", getCipheredText(), encryptData(CreateImporteRequest(importe.getConcept(), importe.getDateString(), importe.getAmount(), importe.getBalanceAfter(), importe.getSeasonId())) ?: throw Exception(authenticationErrorMessage)) },
+            call = { token -> ApiClient.importe.create("Bearer $token", getCipheredText(), encryptData(CreateImporteRequest(importe.concept, importe.getDateString(), importe.amount, importe.balanceAfter, importe.seasonId)) ?: throw Exception(authenticationErrorMessage)) },
             parser = { json ->
-                val parsed = GsonBuilder().setDateFormat("yyyy-MM-dd").create()
+                val parsed = GsonBuilder().setDateFormat(DATE_FORMAT).create()
                     .fromJson<BaseResponse<Importe?>>(json, object : TypeToken<BaseResponse<Importe?>>() {}.type)
                 if (parsed.success) AppResult.Success(parsed.message, parsed.data)
                 else AppResult.Error(parsed.message)

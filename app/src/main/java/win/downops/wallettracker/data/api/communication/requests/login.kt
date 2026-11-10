@@ -1,7 +1,9 @@
 package win.downops.wallettracker.data.api.communication.requests
 
+import com.google.gson.annotations.SerializedName
+
 data class CipheredRequest(
-    val encrypted_aes_key: String?,
+    @SerializedName("encrypted_aes_key") val encryptedAesKey: String?,
     val iv: String?,
     val ciphertext: String?,
     val tag: String?

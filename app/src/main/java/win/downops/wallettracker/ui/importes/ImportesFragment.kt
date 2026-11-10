@@ -51,16 +51,20 @@ class ImportesFragment : Fragment() {
                 val year = (parent.getItemAtPosition(pos) as YearOption).year
                 viewModel.selectYear(year)
             }
-            override fun onNothingSelected(parent: AdapterView<*>) {}
+            override fun onNothingSelected(parent: AdapterView<*>) {
+                // Intentionally empty: keeping the current year selection when nothing is picked
+            }
         }
 
         binding.spinnerMonth.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>, v: View?, pos: Int, id: Long) {
                 if (suppressMonthListener) return
                 val monthOpt = parent.getItemAtPosition(pos) as MonthOption
-                viewModel.loadImportes(monthOpt.season.getId())
+                viewModel.loadImportes(monthOpt.season.id)
             }
-            override fun onNothingSelected(parent: AdapterView<*>) {}
+            override fun onNothingSelected(parent: AdapterView<*>) {
+                // Intentionally empty: keeping the current month selection when nothing is picked
+            }
         }
 
         binding.btnEmptySeason.setOnClickListener {
@@ -91,7 +95,7 @@ class ImportesFragment : Fragment() {
             binding.spinnerMonth.adapter = spinnerAdapter
             
             viewModel.selectedMonthId.value?.let { monthId ->
-                val index = monthList.indexOfFirst { it.season.getId() == monthId }
+                val index = monthList.indexOfFirst { it.season.id == monthId }
                 if (index >= 0) {
                     binding.spinnerMonth.setSelection(index)
                 }
@@ -101,7 +105,7 @@ class ImportesFragment : Fragment() {
 
         viewModel.selectedMonthId.observe(viewLifecycleOwner) { monthId ->
             val monthList = viewModel.months.value ?: return@observe
-            val index = monthList.indexOfFirst { it.season.getId() == monthId }
+            val index = monthList.indexOfFirst { it.season.id == monthId }
             if (index >= 0 && binding.spinnerMonth.selectedItemPosition != index) {
                 suppressMonthListener = true
                 binding.spinnerMonth.setSelection(index)

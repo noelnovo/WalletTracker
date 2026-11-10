@@ -34,6 +34,8 @@ import java.text.SimpleDateFormat
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
+private const val DATE_PATTERN = "yyyy-MM-dd"
+
 @AndroidEntryPoint
 class CreateExpenseFragment : Fragment() {
     private val viewModel: CreateExpenseViewModel by viewModels()
@@ -164,8 +166,8 @@ class CreateExpenseFragment : Fragment() {
             if (expense != null){
                 binding.inputPrice.setText(expense.getPrice().toString())
 
-                binding.inputDesc.setText(expense.getDescription())
-                val format = SimpleDateFormat("yyyy-MM-dd")
+                binding.inputDesc.setText(expense.description)
+                val format = SimpleDateFormat(DATE_PATTERN)
                 val stringDate = format.format(expense.getDate())
                 binding.inputDate.setText(stringDate)
 
@@ -193,7 +195,7 @@ class CreateExpenseFragment : Fragment() {
     private fun loadDefaultDateTime() {
 
         val currentDateTime = LocalDate.now()
-        val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
+        val formatter = DateTimeFormatter.ofPattern(DATE_PATTERN)
         binding.inputDate.setText(formatter.format(currentDateTime))
     }
 
@@ -202,7 +204,7 @@ class CreateExpenseFragment : Fragment() {
         binding.pickDate.setOnClickListener {
             showDatePickerDialog()
         }
-        binding.inputPrice.setOnEditorActionListener { v, actionId, event ->
+        binding.inputPrice.setOnEditorActionListener { _, actionId, event ->
             if (actionId == EditorInfo.IME_ACTION_NEXT ||
                 (actionId == EditorInfo.IME_ACTION_DONE)) {
                 createOrEditChanges()
@@ -326,7 +328,7 @@ class CreateExpenseFragment : Fragment() {
 
             val dateString = binding.inputDate.text.toString()
 
-            val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
+            val formatter = DateTimeFormatter.ofPattern(DATE_PATTERN)
             var date = Date.valueOf(formatter.format(LocalDate.now()))
 
 
@@ -336,15 +338,14 @@ class CreateExpenseFragment : Fragment() {
 
             val adapter = binding.comboCategorias.adapter as ComboCategoriasAdapter
             val category = adapter.getItem(binding.comboCategorias.selectedItemPosition)
-            val catId: Long = category.getId()
-            if (expenseId > 0){
-                val expense = Expense(expenseId, price, date, catId, descString)
-                return expense
+            val catId: Long = category.id
+            val expense = if (expenseId > 0){
+                Expense(expenseId, price, date, catId, descString)
             }
             else{
-                val expense = Expense(price, date, catId, descString)
-                return expense
+                Expense(price, date, catId, descString)
             }
+            return expense
 
         }
         catch (e:Exception){
@@ -358,7 +359,7 @@ class CreateExpenseFragment : Fragment() {
         val dateSetListener = DatePickerDialog.OnDateSetListener { _, year, month, day ->
 
             val selectedDate = LocalDate.of(year, month + 1, day)
-            val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
+            val formatter = DateTimeFormatter.ofPattern(DATE_PATTERN)
             binding.inputDate.setText(formatter.format(selectedDate))
         }
 
