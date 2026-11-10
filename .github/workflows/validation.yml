@@ -76,28 +76,27 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-  security:
+  security-analysis:
     if: github.event_name == 'push'
-    concurrency:
-      group: wallettracker-security-analysis
-      queue: max
-      cancel-in-progress: false
     needs: [checks, unsigned-build]
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
     permissions:
       contents: read
+      pull-requests: read
+      actions: read
+      statuses: write
       id-token: write
+    uses: noelnovo/.github/.github/workflows/dependency-track-scan.yml@55425668e1d0aaac5a60c7eec35b91a99d483b79
+
+  # Preserve the exact mandatory release-evidence job name. This is only an
+  # aggregate result: scanner implementation/credentials live in the generic.
+  security:
+    if: always() && github.event_name == 'push'
+    needs: security-analysis
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: actions/download-artifact@v4
-        with:
-          name: security-input-${{ github.sha }}-${{ github.run_attempt }}
-          path: .
-      - name: Validate resolved CycloneDX SBOM
-        run: python3 ci/security_gate.py prepare
-      - name: Enforce SonarQube quality gate and Dependency-Track vulnerability gate
-        run: python3 ci/security_gate.py scan
+      - name: Require the successful shared security analysis
+        env:
+          SECURITY_RESULT: ${{ needs.security-analysis.result }}
+        run: test "$SECURITY_RESULT" = success
