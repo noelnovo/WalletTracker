@@ -26,6 +26,8 @@ class WalletModel(application: Application) : AndroidViewModel(application) {
     var store: FinanceStore? = null; private set
     val changes = MutableStateFlow(0)
     val status = MutableStateFlow("")
+    /** Server-provided configuration so the UI never hardcodes server policy. */
+    val currencies = MutableStateFlow(listOf("EUR", "USD", "GBP"))
     val savedAccount get() = prefs.getString("account", null)
     val savedName get() = prefs.getString("username", "") ?: ""
     val wrappedRefresh get() = prefs.getString("refresh", null)
@@ -133,6 +135,14 @@ class WalletModel(application: Application) : AndroidViewModel(application) {
                     val page = api.call("sync?cursor=${local.cursor()}&limit=100", token=access)
                     local.applyPage(page)
                 } while (page.getBoolean("has_more") && unlocked)
+                // Configuration is best-effort; failures keep the last known values.
+                runCatching {
+                    val properties = api.call("properties", token = access)
+                    properties.optJSONArray("currencies")?.let { list ->
+                        val values = List(list.length()) { list.getString(it) }
+                        if (values.isNotEmpty()) currencies.value = values
+                    }
+                }
             }
             if (!unlocked) return@withLock
             val summary = withContext(Dispatchers.IO) {

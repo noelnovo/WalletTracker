@@ -242,8 +242,8 @@ class WalletActivity : AppCompatActivity() {
         val field = MaterialAutoCompleteTextView(box.context).apply {
             inputType = InputType.TYPE_NULL; minHeight = dp(56); maxLines = 1
             setPaddingRelative(dp(16), paddingTop, dp(16), paddingBottom)
-            setAdapter(ArrayAdapter(this@WalletActivity, android.R.layout.simple_list_item_1, listOf("EUR", "USD", "GBP")))
-            setText(value ?: "EUR", false)
+            setAdapter(ArrayAdapter(this@WalletActivity, android.R.layout.simple_list_item_1, model.currencies.value))
+            setText(value ?: model.currencies.value.first(), false)
         }
         box.addView(field, LinearLayout.LayoutParams(-1, -2))
         return box to field
@@ -720,8 +720,12 @@ class WalletActivity : AppCompatActivity() {
             }
             else -> { key: String -> design.text(displayDay(key), 13f, muted, true).apply { setPadding(dp(4), dp(12), 0, dp(8)) } }
         }
+        // Same-person rows must be adjacent or the group headers shatter;
+        // within a person, unpaid first and biggest debt first.
         val displayRows = if (kind == "debt") rows.sortedWith(compareBy(
-            { it.getJSONObject("payload").optBoolean("paid") }, { -it.getJSONObject("payload").optLong("amount_minor") })) else rows
+            { it.getJSONObject("payload").optBoolean("paid") },
+            { personKey(it).lowercase(Locale.ROOT) },
+            { -it.getJSONObject("payload").optLong("amount_minor") })) else rows
         val adapter = RecordAdapter(displayRows, overview, groupKey, groupHeader)
         list.adapter = adapter
         listPositions[screen]?.let { list.layoutManager?.onRestoreInstanceState(it) }
@@ -740,7 +744,7 @@ class WalletActivity : AppCompatActivity() {
             }
             override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
                 val index = viewHolder.bindingAdapterPosition - 1
-                if (index in rows.indices) stageDelete(rows[index])
+                if (index in displayRows.indices) stageDelete(displayRows[index])
             }
         }).attachToRecyclerView(list)
         if (rows.isEmpty()) {
