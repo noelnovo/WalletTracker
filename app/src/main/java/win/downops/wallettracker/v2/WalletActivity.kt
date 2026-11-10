@@ -696,38 +696,45 @@ class WalletActivity : AppCompatActivity() {
             textSize = 13f; setIconResource(R.drawable.wallet_ic_category); iconSize = dp(16)
         })
         overview.addView(section)
+        recordList(kind, rows, overview)
+    }
+
+    /** Per-kind list grouping: debts group by person, records otherwise by day. */
+    private inner class Groups(val displayRows: List<JSONObject>,
+                               val key: (JSONObject) -> String,
+                               val header: (String) -> View)
+
+    private fun grouping(kind: String, rows: List<JSONObject>): Groups {
+        val personKey: (JSONObject) -> String = { it.getJSONObject("payload").optString("person").ifEmpty { "Someone" } }
+        if (kind != "debt") return Groups(rows,
+            { row -> row.getJSONObject("payload").optString("date") },
+            { key -> design.text(displayDay(key), 13f, muted, true).apply { setPadding(dp(4), dp(12), 0, dp(8)) } })
+        // Same-person rows must be adjacent or the group headers shatter;
+        // within a person, unpaid first and biggest debt first.
+        val displayRows = rows.sortedWith(compareBy(
+            { it.getJSONObject("payload").optBoolean("paid") },
+            { personKey(it).lowercase(Locale.ROOT) },
+            { -it.getJSONObject("payload").optLong("amount_minor") }))
+        val header: (String) -> View = { key: String ->
+            val currency = rows.first { personKey(it) == key }.getJSONObject("payload").optString("currency", "EUR")
+            val outstanding = rows.filter { personKey(it) == key && !it.getJSONObject("payload").optBoolean("paid") }
+                .sumOf { it.getJSONObject("payload").optLong("amount_minor") }
+            LinearLayout(this).apply {
+                gravity = Gravity.CENTER_VERTICAL; setPadding(dp(4), dp(12), dp(4), dp(8))
+                addView(design.text(key, 13f, muted, true), LinearLayout.LayoutParams(0, -2, 1f))
+                addView(design.text(if (outstanding > 0) "${money(outstanding, currency)} owed" else "Settled", 13f, muted, true))
+            }
+        }
+        return Groups(displayRows, personKey, header)
+    }
+
+    private fun recordList(kind: String, rows: List<JSONObject>, overview: LinearLayout) {
+        val groups = grouping(kind, rows)
         val list = RecyclerView(this).apply {
             layoutManager = LinearLayoutManager(this@WalletActivity)
             setPadding(0, 0, 0, dp(12)); clipToPadding = false
         }
-        // Debts read as "who owes me what": people with outstanding money first,
-        // biggest debt first; settled people follow. Rows group under each person.
-        val personKey: (JSONObject) -> String = { it.getJSONObject("payload").optString("person").ifEmpty { "Someone" } }
-        val groupKey: (JSONObject) -> String = when (kind) {
-            "debt" -> personKey
-            else -> { row: JSONObject -> row.getJSONObject("payload").optString("date") }
-        }
-        val groupHeader: (String) -> View = when (kind) {
-            "debt" -> { key: String ->
-                val currency = rows.first { personKey(it) == key }.getJSONObject("payload").optString("currency", "EUR")
-                val outstanding = rows.filter { personKey(it) == key && !it.getJSONObject("payload").optBoolean("paid") }
-                    .sumOf { it.getJSONObject("payload").optLong("amount_minor") }
-                LinearLayout(this).apply {
-                    gravity = Gravity.CENTER_VERTICAL; setPadding(dp(4), dp(12), dp(4), dp(8))
-                    addView(design.text(key, 13f, muted, true), LinearLayout.LayoutParams(0, -2, 1f))
-                    addView(design.text(if (outstanding > 0) "${money(outstanding, currency)} owed" else "Settled", 13f, muted, true))
-                }
-            }
-            else -> { key: String -> design.text(displayDay(key), 13f, muted, true).apply { setPadding(dp(4), dp(12), 0, dp(8)) } }
-        }
-        // Same-person rows must be adjacent or the group headers shatter;
-        // within a person, unpaid first and biggest debt first.
-        val displayRows = if (kind == "debt") rows.sortedWith(compareBy(
-            { it.getJSONObject("payload").optBoolean("paid") },
-            { personKey(it).lowercase(Locale.ROOT) },
-            { -it.getJSONObject("payload").optLong("amount_minor") })) else rows
-        val adapter = RecordAdapter(displayRows, overview, groupKey, groupHeader)
-        list.adapter = adapter
+        list.adapter = RecordAdapter(groups.displayRows, overview, groups.key, groups.header)
         listPositions[screen]?.let { list.layoutManager?.onRestoreInstanceState(it) }
         ItemTouchHelper(object : ItemTouchHelper.SimpleCallback(0, ItemTouchHelper.LEFT) {
             override fun getSwipeDirs(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder) = if (viewHolder.itemViewType == 0) 0 else super.getSwipeDirs(recyclerView, viewHolder)
@@ -744,7 +751,7 @@ class WalletActivity : AppCompatActivity() {
             }
             override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
                 val index = viewHolder.bindingAdapterPosition - 1
-                if (index in displayRows.indices) stageDelete(displayRows[index])
+                if (index in groups.displayRows.indices) stageDelete(groups.displayRows[index])
             }
         }).attachToRecyclerView(list)
         if (rows.isEmpty()) {
@@ -769,13 +776,13 @@ class WalletActivity : AppCompatActivity() {
     }
 
     private fun displayDay(value: String): String {
-        val localDate = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+        val localDate = SimpleDateFormat(ISO_DATE, Locale.US)
         val today = localDate.format(Date())
         val yesterday = java.util.Calendar.getInstance().apply { add(java.util.Calendar.DAY_OF_YEAR, -1) }.time
         if (value == today) return "Today"
         if (value == localDate.format(yesterday)) return "Yesterday"
         return runCatching {
-            val iso = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC"); isLenient = false }
+            val iso = SimpleDateFormat(ISO_DATE, Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC"); isLenient = false }
             DateFormat.getDateInstance(DateFormat.MEDIUM).apply { timeZone = TimeZone.getTimeZone("UTC") }.format(requireNotNull(iso.parse(value)))
         }.getOrDefault(value)
     }
@@ -839,7 +846,7 @@ class WalletActivity : AppCompatActivity() {
                 }.apply { textSize = 13f })
                 else cardBody.addView(textButton("Mark paid") {
                     val updated = JSONObject(row.getJSONObject("payload").toString()).put("paid", true)
-                        .put("paid_date", SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()))
+                        .put("paid_date", SimpleDateFormat(ISO_DATE, Locale.US).format(Date()))
                     model.store!!.save("debt", updated, row); model.changed(); render()
                 }.apply { textSize = 13f })
             }
