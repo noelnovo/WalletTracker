@@ -700,7 +700,29 @@ class WalletActivity : AppCompatActivity() {
             layoutManager = LinearLayoutManager(this@WalletActivity)
             setPadding(0, 0, 0, dp(12)); clipToPadding = false
         }
-        val adapter = RecordAdapter(rows, overview)
+        // Debts read as "who owes me what": people with outstanding money first,
+        // biggest debt first; settled people follow. Rows group under each person.
+        val personKey: (JSONObject) -> String = { it.getJSONObject("payload").optString("person").ifEmpty { "Someone" } }
+        val groupKey: (JSONObject) -> String = when (kind) {
+            "debt" -> personKey
+            else -> { row: JSONObject -> row.getJSONObject("payload").optString("date") }
+        }
+        val groupHeader: (String) -> View = when (kind) {
+            "debt" -> { key: String ->
+                val currency = rows.first { personKey(it) == key }.getJSONObject("payload").optString("currency", "EUR")
+                val outstanding = rows.filter { personKey(it) == key && !it.getJSONObject("payload").optBoolean("paid") }
+                    .sumOf { it.getJSONObject("payload").optLong("amount_minor") }
+                LinearLayout(this).apply {
+                    gravity = Gravity.CENTER_VERTICAL; setPadding(dp(4), dp(12), dp(4), dp(8))
+                    addView(design.text(key, 13f, muted, true), LinearLayout.LayoutParams(0, -2, 1f))
+                    addView(design.text(if (outstanding > 0) "${money(outstanding, currency)} owed" else "Settled", 13f, muted, true))
+                }
+            }
+            else -> { key: String -> design.text(displayDay(key), 13f, muted, true).apply { setPadding(dp(4), dp(12), 0, dp(8)) } }
+        }
+        val displayRows = if (kind == "debt") rows.sortedWith(compareBy(
+            { it.getJSONObject("payload").optBoolean("paid") }, { -it.getJSONObject("payload").optLong("amount_minor") })) else rows
+        val adapter = RecordAdapter(displayRows, overview, groupKey, groupHeader)
         list.adapter = adapter
         listPositions[screen]?.let { list.layoutManager?.onRestoreInstanceState(it) }
         ItemTouchHelper(object : ItemTouchHelper.SimpleCallback(0, ItemTouchHelper.LEFT) {
@@ -754,7 +776,9 @@ class WalletActivity : AppCompatActivity() {
         }.getOrDefault(value)
     }
 
-    private inner class RecordAdapter(private val rows: List<JSONObject>, private val overview: View) : RecyclerView.Adapter<RecordAdapter.Holder>() {
+    private inner class RecordAdapter(private val rows: List<JSONObject>, private val overview: View,
+                                      private val groupKey: (JSONObject) -> String,
+                                      private val groupHeader: (String) -> View) : RecyclerView.Adapter<RecordAdapter.Holder>() {
         inner class Holder(val box: LinearLayout) : RecyclerView.ViewHolder(box)
         override fun onCreateViewHolder(parent: ViewGroup, type: Int): Holder = Holder(column().apply {
             setPadding(0, 0, 0, dp(10)); layoutParams = RecyclerView.LayoutParams(-1, -2)
@@ -769,20 +793,20 @@ class WalletActivity : AppCompatActivity() {
             }
             val index = position - 1
             val row = rows[index]; val payload = row.getJSONObject("payload")
-            val day = payload.optString("date")
-            if (index == 0 || rows[index - 1].getJSONObject("payload").optString("date") != day) {
-                holder.box.addView(design.text(displayDay(day), 13f, muted, true).apply { setPadding(dp(4), dp(12), 0, dp(8)) })
-            }
+            if (index == 0 || groupKey(rows[index - 1]) != groupKey(row)) holder.box.addView(groupHeader(groupKey(row)))
             val line = LinearLayout(this@WalletActivity).apply { gravity = Gravity.CENTER_VERTICAL }
-            line.addView(design.badge(if (row.getString("kind") == "bill" || row.getString("kind") == "debt") R.drawable.wallet_ic_people else R.drawable.wallet_ic_expense))
+            if (row.getString("kind") != "debt") {
+                line.addView(design.badge(if (row.getString("kind") == "bill") R.drawable.wallet_ic_people else R.drawable.wallet_ic_expense))
+            }
             val paid = row.getString("kind") == "debt" && payload.optBoolean("paid")
+            // Grouping already names the person; debt rows describe what the debt is for.
             val title = when (row.getString("kind")) {
-                "debt" -> payload.optString("person").ifEmpty { payload.optString("description") }
+                "debt" -> payload.optString("description").ifEmpty { payload.optString("person") }
                 else -> payload.optString("description")
             }
             val detail = when (row.getString("kind")) {
                 "bill" -> "${payload.optJSONArray("participants")?.length() ?: 0} people · paid by ${payload.optString("paid_by")}"
-                "debt" -> payload.optString("description")
+                "debt" -> displayDay(payload.optString("date"))
                 else -> categoryName(payload.optString("category_id"))
             }
             val debtPaid = paid
