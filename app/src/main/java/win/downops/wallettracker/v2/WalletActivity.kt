@@ -357,7 +357,7 @@ class WalletActivity : AppCompatActivity() {
         val titleRow = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         pageTitle = design.text("", 30f, ink, true)
         titleRow.addView(pageTitle, LinearLayout.LayoutParams(0, -2, 1f))
-        statusAction = textButton("") { selectScreen(3) }.apply { textSize = 12f; setTextColor(muted); setPadding(dp(8), 0, dp(8), 0) }
+        statusAction = textButton("") { selectScreen(4) }.apply { textSize = 12f; setTextColor(muted); setPadding(dp(8), 0, dp(8), 0) }
         if (resources.configuration.fontScale < 1.3f) titleRow.addView(statusAction)
         header.addView(titleRow)
         val readableWidth = minOf(resources.displayMetrics.widthPixels, dp(640))
@@ -367,7 +367,8 @@ class WalletActivity : AppCompatActivity() {
         val nav = BottomNavigationView(this)
         nav.menu.add(0, 1, 0, "Expenses").setIcon(R.drawable.wallet_ic_expense)
         nav.menu.add(0, 2, 1, "Bills").setIcon(R.drawable.wallet_ic_people)
-        nav.menu.add(0, 3, 2, "Settings").setIcon(R.drawable.wallet_ic_settings)
+        nav.menu.add(0, 3, 2, "Debts").setIcon(R.drawable.wallet_ic_people)
+        nav.menu.add(0, 4, 3, "Settings").setIcon(R.drawable.wallet_ic_settings)
         nav.setBackgroundColor(design.cardSurface)
         val navigationTint = ColorStateList(arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()), intArrayOf(primary, muted))
         nav.itemIconTintList = navigationTint; nav.itemTextColor = navigationTint
@@ -391,7 +392,7 @@ class WalletActivity : AppCompatActivity() {
     private fun showScreen() {
         if (!model.unlocked || shellStore !== model.store) return
         renderedScreen = screen
-        pageTitle?.text = when (screen) { 2 -> "Split bills"; 3 -> "Settings"; else -> "Expenses" }
+        pageTitle?.text = when (screen) { 2 -> "Split bills"; 3 -> "Debts"; 4 -> "Settings"; else -> "Expenses" }
         pageHost.removeAllViews()
         pages[screen]?.let {
             contentFrame = it.frame; content = it.body
@@ -405,7 +406,7 @@ class WalletActivity : AppCompatActivity() {
         pageHost.addView(contentFrame, FrameLayout.LayoutParams(-1, -1))
         pages[screen] = Page(contentFrame, content)
         if (loadedRevision < 0) content.addView(text("Loading your wallet…", 14f, muted))
-        else when (screen) { 2 -> finances("bill"); 3 -> settings(); else -> finances("expense") }
+        else when (screen) { 2 -> finances("bill"); 3 -> finances("debt"); 4 -> settings(); else -> finances("expense") }
     }
 
     /** Save positions only, never wallet contents, credentials, or form drafts. */
@@ -599,8 +600,8 @@ class WalletActivity : AppCompatActivity() {
             if (!model.unlocked || model.account != account) return@task
             val available = snapshot != null
             if (legacyDataAvailable != available) {
-                legacyDataAvailable = available; pages.remove(3)
-                if (screen == 3) showScreen()
+                legacyDataAvailable = available; pages.remove(4)
+                if (screen == 4) showScreen()
             }
             if (snapshot == null) return@task
             val target = if (account == "local") "Local wallet" else model.savedName
@@ -621,15 +622,15 @@ class WalletActivity : AppCompatActivity() {
     private fun finances(kind: String) {
         val rows = visibleRows.filter { it.getString("kind") == kind }
         val totals = rows.groupBy { it.getJSONObject("payload").optString("currency", "EUR") }
-            .map { (currency, values) -> money(values.sumOf { it.getJSONObject("payload").optLong("amount_minor") }, currency) }
+            .map { (currency, values) -> money(values.filter { !it.getJSONObject("payload").optBoolean("paid") }.sumOf { it.getJSONObject("payload").optLong("amount_minor") }, currency) }
         val overview = design.column()
         val summary = design.column(20)
-        summary.addView(design.text(if (kind == "bill") "BILLS TOTAL" else "TOTAL SPENDING", 12f, design.onContainer, true))
+        summary.addView(design.text(when (kind) { "bill" -> "BILLS TOTAL"; "debt" -> "OWED TO ME"; else -> "TOTAL SPENDING" }, 12f, design.onContainer, true))
         (totals.ifEmpty { listOf(money(0)) }).forEach { value -> summary.addView(design.text(value, 34f, design.onContainer, true)) }
-        summary.addView(design.text("${rows.size} ${if (kind == "bill") "bills" else "expenses"} · All time", 13f, design.onContainer))
+        summary.addView(design.text("${rows.size} ${when (kind) { "bill" -> "bills"; "debt" -> "debts"; else -> "expenses" }} · All time", 13f, design.onContainer))
         overview.addView(design.featuredCard(summary))
         val section = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(12), 0, dp(4)) }
-        section.addView(design.text(if (kind == "bill") "Your splits" else "Recent expenses", 18f, ink, true), LinearLayout.LayoutParams(0, -2, 1f))
+        section.addView(design.text(when (kind) { "bill" -> "Your splits"; "debt" -> "Money owed to you"; else -> "Recent expenses" }, 18f, ink, true), LinearLayout.LayoutParams(0, -2, 1f))
         if (kind == "expense") section.addView(textButton("Categories") { categories() }.apply {
             textSize = 13f; setIconResource(R.drawable.wallet_ic_category); iconSize = dp(16)
         })
@@ -661,17 +662,17 @@ class WalletActivity : AppCompatActivity() {
         }).attachToRecyclerView(list)
         if (rows.isEmpty()) {
             val empty = design.column().apply { gravity = Gravity.CENTER; setPadding(dp(20), dp(24), dp(20), dp(24)) }
-            empty.addView(design.badge(if (kind == "bill") R.drawable.wallet_ic_people else R.drawable.wallet_ic_expense, 60))
-            empty.addView(design.text(if (kind == "bill") "No bills yet" else "No expenses yet", 21f, ink, true).apply {
+            empty.addView(design.badge(if (kind == "bill") R.drawable.wallet_ic_people else if (kind == "debt") R.drawable.wallet_ic_people else R.drawable.wallet_ic_expense, 60))
+            empty.addView(design.text(when (kind) { "bill" -> "No bills yet"; "debt" -> "No debts yet"; else -> "No expenses yet" }, 21f, ink, true).apply {
                 gravity = Gravity.CENTER; setPadding(0, dp(16), 0, dp(4))
             })
-            empty.addView(text(if (kind == "bill") "Add a bill and give everyone a fair share." else "Your spending will appear here.", 14f, muted).apply { gravity = Gravity.CENTER })
+            empty.addView(text(when (kind) { "bill" -> "Add a bill and give everyone a fair share."; "debt" -> "Track money people owe you."; else -> "Your spending will appear here." }, 14f, muted).apply { gravity = Gravity.CENTER })
             overview.addView(empty)
         }
         // Reserve the action area instead of allowing the extended FAB to cover records.
         content.addView(list, LinearLayout.LayoutParams(-1, -1).apply { bottomMargin = dp(80) })
         contentFrame.addView(ExtendedFloatingActionButton(this).apply {
-            text = if (kind == "bill") "Split bill" else "Add expense"; isAllCaps = false
+            text = when (kind) { "bill" -> "Split bill"; "debt" -> "Add debt"; else -> "Add expense" }; isAllCaps = false
             setIconResource(R.drawable.wallet_ic_plus)
             backgroundTintList = ColorStateList.valueOf(primary)
             val onPrimary = design.color(com.google.android.material.R.attr.colorOnPrimary)
@@ -712,8 +713,12 @@ class WalletActivity : AppCompatActivity() {
                 holder.box.addView(design.text(displayDay(day), 13f, muted, true).apply { setPadding(dp(4), dp(12), 0, dp(8)) })
             }
             val line = LinearLayout(this@WalletActivity).apply { gravity = Gravity.CENTER_VERTICAL }
-            line.addView(design.badge(if (row.getString("kind") == "bill") R.drawable.wallet_ic_people else R.drawable.wallet_ic_expense))
-            val detail = if (row.getString("kind") == "bill") "${payload.optJSONArray("participants")?.length() ?: 0} people · paid by ${payload.optString("paid_by")}" else categoryName(payload.optString("category_id"))
+            line.addView(design.badge(if (row.getString("kind") == "bill" || row.getString("kind") == "debt") R.drawable.wallet_ic_people else R.drawable.wallet_ic_expense))
+            val detail = when (row.getString("kind")) {
+                "bill" -> "${payload.optJSONArray("participants")?.length() ?: 0} people · paid by ${payload.optString("paid_by")}"
+                "debt" -> "${payload.optString("person")} · ${if (payload.optBoolean("paid")) "Paid" else "Unpaid"}"
+                else -> categoryName(payload.optString("category_id"))
+            }
             val labels = design.column()
             labels.addView(design.text(payload.optString("description"), 16f, ink, true).apply { maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END })
             labels.addView(text(detail, 12f, muted).apply { maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END })
@@ -723,6 +728,14 @@ class WalletActivity : AppCompatActivity() {
             line.addView(labels, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(12) })
             if (!largeText) line.addView(design.text(amount, 18f, ink, true).apply { setPadding(dp(8), 0, 0, 0) })
             val cardBody = design.column(16).apply { addView(line) }
+            if (row.getString("kind") == "debt") {
+                if (row.getJSONObject("payload").optBoolean("paid")) cardBody.addView(design.pill("Paid"))
+                else cardBody.addView(textButton("Mark paid") {
+                    val updated = JSONObject(row.getJSONObject("payload").toString()).put("paid", true)
+                        .put("paid_date", SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()))
+                    model.store!!.save("debt", updated, row); model.changed(); render()
+                }.apply { textSize = 13f })
+            }
             if (row.optBoolean("has_conflict") || row.optBoolean("needs_review")) cardBody.addView(design.pill("Needs review",
                 design.color(com.google.android.material.R.attr.colorTertiaryContainer), design.color(com.google.android.material.R.attr.colorOnTertiaryContainer)))
             holder.box.addView(design.card(cardBody, radius = 20).apply { setOnClickListener {
@@ -785,6 +798,7 @@ class WalletActivity : AppCompatActivity() {
 
     private fun editor(kind: String, row: JSONObject? = null) {
         if (kind == "bill") { billEditor(row); return }
+        if (kind == "debt") { debtEditor(row); return }
         val categories = categoryRows().filter { !it.optBoolean("needs_review") && !it.optBoolean("has_conflict") }
         if (kind == "expense" && categories.isEmpty()) { categoryEditor(null) { editor(kind, row) }; return }
         val old = row?.getJSONObject("payload")
@@ -879,6 +893,95 @@ class WalletActivity : AppCompatActivity() {
             ::showDialog,
             { payload -> model.store!!.save("bill", payload, row); model.changed(); render() },
         ).show()
+    }
+
+    private fun debtEditor(row: JSONObject? = null) {
+        val old = row?.getJSONObject("payload")
+        val body = column()
+        val amountFields = design.column(20)
+        val amount = input(amountFields, "Amount", InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL).apply {
+            textSize = 28f; typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            old?.let { setText(BigDecimal.valueOf(it.getLong("amount_minor"), 2).toPlainString()) }
+        }
+        body.addView(design.card(amountFields))
+        body.addView(design.heading("Details"))
+        val details = design.column(20)
+        val person = input(details, "Person who owes you").apply { setText(old?.optString("person")) }
+        val description = input(details, "Description (what for)").apply { setText(old?.optString("description")) }
+        val today = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+        val iso = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC"); isLenient = false }
+        val originalDay = old?.optString("date") ?: today
+        var dateConfirmed = originalDay.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) && runCatching { iso.format(requireNotNull(iso.parse(originalDay))) == originalDay }.getOrDefault(false)
+        var selectedDay = if (dateConfirmed) originalDay else today
+        val displayDate = DateFormat.getDateInstance(DateFormat.MEDIUM).apply { timeZone = TimeZone.getTimeZone("UTC") }
+        val dateBox = TextInputLayout(this).apply {
+            hint = "Date"; boxBackgroundMode = TextInputLayout.BOX_BACKGROUND_OUTLINE
+            endIconMode = TextInputLayout.END_ICON_CUSTOM; setEndIconDrawable(R.drawable.ic_calendar)
+            endIconContentDescription = "Choose date"
+        }
+        if (!dateConfirmed) dateBox.error = "Choose date"
+        val date = TextInputEditText(dateBox.context).apply {
+            setText(displayDate.format(requireNotNull(iso.parse(selectedDay))))
+            inputType = InputType.TYPE_NULL; isFocusable = false; isCursorVisible = false
+            minHeight = dp(56); maxLines = 1
+        }
+        dateBox.addView(date, LinearLayout.LayoutParams(-1, -2))
+        fun chooseDate() {
+            MaterialDatePicker.Builder.datePicker().setTitleText("Date")
+                .setSelection(requireNotNull(iso.parse(selectedDay)).time).build().apply {
+                    addOnPositiveButtonClickListener { value ->
+                        selectedDay = iso.format(Date(value)); date.setText(displayDate.format(Date(value)))
+                        dateConfirmed = true; dateBox.error = null
+                    }
+                }.show(supportFragmentManager, "wallet-date")
+        }
+        date.setOnClickListener { chooseDate() }; dateBox.setEndIconOnClickListener { chooseDate() }
+        val currencyBox = TextInputLayout(this).apply {
+            hint = "Currency"; boxBackgroundMode = TextInputLayout.BOX_BACKGROUND_OUTLINE
+            endIconMode = TextInputLayout.END_ICON_DROPDOWN_MENU
+        }
+        val currency = MaterialAutoCompleteTextView(currencyBox.context).apply {
+            inputType = InputType.TYPE_NULL; minHeight = dp(56); maxLines = 1
+            setPaddingRelative(dp(16), paddingTop, dp(16), paddingBottom)
+            setAdapter(ArrayAdapter(this@WalletActivity, android.R.layout.simple_list_item_1, listOf("EUR", "USD", "GBP")))
+            setText(old?.optString("currency") ?: "EUR", false)
+        }
+        currencyBox.addView(currency, LinearLayout.LayoutParams(-1, -2))
+        val metadata = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        metadata.addView(dateBox, LinearLayout.LayoutParams(0, -2, 1.4f))
+        metadata.addView(currencyBox, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(12) })
+        details.addView(metadata, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) })
+        val paid = MaterialCheckBox(this).apply { text = "Paid"; isChecked = old?.optBoolean("paid") == true }
+        details.addView(paid)
+        body.addView(design.card(details))
+        val amountBox = amount.parent.parent as TextInputLayout
+        amountBox.suffixText = currency.text.toString()
+        currency.setOnItemClickListener { _, _, _, _ -> amountBox.suffixText = currency.text.toString() }
+        val formError = text("", 14f, com.google.android.material.color.MaterialColors.getColor(this, androidx.appcompat.R.attr.colorError, Color.RED))
+        body.addView(formError)
+        lateinit var dialog: androidx.appcompat.app.AlertDialog
+        dialog = formDialog(if (row == null) "Add debt" else "Edit debt", body, if (row == null) "Add debt" else "Save") {
+            try {
+                formError.text = ""; amount.error = null; person.error = null
+                val minor = BillSplitter.amount(amount.text.toString())
+                val who = person.text.toString().trim(); require(who.isNotEmpty() && who.length <= 80) { "Enter a person (1–80 characters)" }
+                val note = description.text.toString().trim()
+                if (note.isNotEmpty()) require(note.length <= 255) { "Description up to 255 characters" }
+                require(dateConfirmed) { "Choose a date" }
+                val day = selectedDay; val parser = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { isLenient = false }
+                require(day.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) && parser.format(requireNotNull(parser.parse(day))) == day) { "Enter a valid YYYY-MM-DD date" }
+                val payload = JSONObject().put("person", who).put("amount_minor", minor).put("currency", currency.text.toString()).put("date", day)
+                    .put("description", note).put("paid", paid.isChecked)
+                if (paid.isChecked) payload.put("paid_date", old?.optString("paid_date") ?: today)
+                model.store!!.save("debt", payload, row); model.changed(); render(); dialog.dismiss()
+            } catch (error: Exception) {
+                formError.text = error.message ?: "Check the form"
+                if (runCatching { BillSplitter.amount(amount.text.toString()) }.isFailure) amount.error = formError.text
+                if (person.text.toString().trim().isEmpty()) person.error = "Enter a person"
+                formError.requestRectangleOnScreen(android.graphics.Rect(0, 0, formError.width, formError.height), true)
+            }
+        }
+        showDialog(dialog)
     }
 
     private fun stageDelete(row: JSONObject) {

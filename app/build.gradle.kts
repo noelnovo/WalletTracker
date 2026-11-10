@@ -1,14 +1,15 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 val majorVersion = 3
-val minorVersion = 1
-val patchVersion = 1
+val minorVersion = 2
+val patchVersion = 0
 
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
+    id("jacoco")
 }
 
 android {
@@ -20,7 +21,7 @@ android {
         minSdk = 24
         targetSdk = 36
         versionCode = majorVersion * 10000 + minorVersion * 100 + patchVersion
-        versionName = "$majorVersion.$minorVersion.$patchVersion"
+        versionName = "$majorVersion.$minorVersion.$patchVersion-alpha"
         // Compiled UI capability only; authorization always belongs to the backend.
         buildConfigField("boolean", "REGISTRATION_UI_AVAILABLE", "true")
 
@@ -47,6 +48,7 @@ android {
     buildTypes {
         debug {
             if (!devKeyFile.isNullOrBlank()) signingConfig = signingConfigs.getByName("development")
+            enableUnitTestCoverage = true
             buildConfigField("String", "API_BASE_URL", "\"https://wallettracker-dev.int.downops.win\"")
             buildConfigField("String", "API_VERSION", "\"2\"")
             buildConfigField("String", "SIGN_SECRET", "\"\"") // Legacy v1 code only; never used by v2.
@@ -103,4 +105,26 @@ dependencies {
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
     implementation(libs.androidx.biometric)
+}
+
+jacoco {
+    toolVersion = "0.8.12"
+}
+
+tasks.register<JacocoReport>("jacocoTestReport") {
+    dependsOn("testDebugUnitTest")
+    reports {
+        xml.required.set(true)
+        html.required.set(true)
+        csv.required.set(false)
+    }
+    sourceDirectories.setFrom(files("src/main/java", "src/main/kotlin"))
+    classDirectories.setFrom(fileTree("build/intermediates/javac/debug/classes") {
+        exclude("**/R.class", "**/R$*.class", "**/BuildConfig.*", "**/Manifest*.*")
+    }, fileTree("build/tmp/kotlin-classes/debug") {
+        exclude("**/R.class", "**/R$*.class", "**/BuildConfig.*", "**/Manifest*.*")
+    })
+    executionData.setFrom(fileTree("build") {
+        include("**/*.exec", "**/*.ec")
+    })
 }
