@@ -804,14 +804,12 @@ class WalletActivity : AppCompatActivity() {
             if (!largeText) line.addView(amountView)
             val cardBody = design.column(16).apply { addView(line) }
             if (row.getString("kind") == "debt") {
-                if (paid) {
-                    cardBody.addView(design.pill("Paid"))
-                    cardBody.addView(textButton("Mark unpaid") {
-                        val updated = JSONObject(row.getJSONObject("payload").toString())
-                        updated.remove("paid"); updated.remove("paid_date")
-                        model.store!!.save("debt", updated, row); model.changed(); render()
-                    }.apply { textSize = 13f })
-                } else cardBody.addView(textButton("Mark paid") {
+                if (paid) cardBody.addView(textButton("Mark unpaid") {
+                    val updated = JSONObject(row.getJSONObject("payload").toString())
+                    updated.remove("paid"); updated.remove("paid_date")
+                    model.store!!.save("debt", updated, row); model.changed(); render()
+                }.apply { textSize = 13f })
+                else cardBody.addView(textButton("Mark paid") {
                     val updated = JSONObject(row.getJSONObject("payload").toString()).put("paid", true)
                         .put("paid_date", SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()))
                     model.store!!.save("debt", updated, row); model.changed(); render()
@@ -819,9 +817,13 @@ class WalletActivity : AppCompatActivity() {
             }
             if (row.optBoolean("has_conflict") || row.optBoolean("needs_review")) cardBody.addView(design.pill("Needs review",
                 design.color(com.google.android.material.R.attr.colorTertiaryContainer), design.color(com.google.android.material.R.attr.colorOnTertiaryContainer)))
-            holder.box.addView(design.card(cardBody, radius = 20).apply { setOnClickListener {
-                when { row.optBoolean("has_conflict") -> conflict(row); row.getString("kind") == "bill" -> billDetails(row); else -> editor(row.getString("kind"), row) }
-            } })
+            val state = if (row.getString("kind") == "debt") if (paid) " Paid" else " Unpaid" else ""
+            holder.box.addView(design.card(cardBody, radius = 20).apply {
+                contentDescription = "$title, $detail, $amount.$state"
+                setOnClickListener {
+                    when { row.optBoolean("has_conflict") -> conflict(row); row.getString("kind") == "bill" -> billDetails(row); else -> editor(row.getString("kind"), row) }
+                }
+            })
         }
     }
 
