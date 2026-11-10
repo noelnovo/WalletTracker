@@ -56,22 +56,34 @@ builds. The GitHub repository is a passive backup mirror without workflows.
 
 ### Security checks
 
-Pipelines on protected DEV/MAIN branches and exact version tags run the
-security-gates job: the built CycloneDX SBOM is uploaded to Dependency-Track,
-then SonarQube analyzes the candidate and the assigned quality gate evaluates
-the result. The gate owns severity/fixable/policy thresholds; a failed gate
-blocks publication. Merge requests never obtain delivery credentials.
+The project uses an immutable external GitLab CI entrypoint. Merge requests and
+protected DEV/MAIN/version-tag pushes call the canonical shared GitLab adapter.
+Build/test jobs have no scanner or signing JWT. A separate pinned scanner reads
+only four own-project Vault records and treats candidate source, compiled classes,
+SBOM and JaCoCo XML as bounded artifact data. Dependency-Track finishes before
+plugin settings are reconciled and the exact Sonar analysis is evaluated. Missing
+metrics or failed/cancelled/skipped producers cannot authorize publication.
+
+Fast-forward-only, successful-pipeline-required merges ensure that the tested
+candidate contains the current target. Advancing either target or source requires
+fresh checks. The unchanged assigned Sonar quality gate owns all thresholds.
+The accepted shared privileged runner remains a trusted administrative boundary,
+not isolation against a malicious runner administrator or project Maintainer.
 
 ### Production releases
 
-The release job runs only on protected `vX.Y.Z` tags and only after the
-security gates pass on the exact tag commit. It verifies the production
-backend is live, validates the previous release checksum, reads the
-production keystore from Vault at job time, signs the unsigned APK with
-`apksigner`, verifies the signer certificate against the pinned production
-identity, and publishes a GitLab release with the signed APK. The job is
-manual: the production reviewer approves by playing it. Never move an
-existing version tag or bypass production approval.
+The manual release job runs only on protected exact-version tags matching current
+MAIN, after the same-pipeline security job succeeds. Its immutable controller never
+imports candidate Python or runs Gradle. Checksum-pinned official SDK tools verify
+the package, version, non-debuggable state and original production certificate.
+A separate signing-only Vault role supplies the existing keystore; passwords use
+environment references, never command-line values. No signing key is generated.
+
+The job uploads the signed APK, checksum and source receipt to GitLab's generic
+package registry, downloads and verifies each file, then publishes release links.
+Existing release/package destinations fail closed: do not retag or overwrite them.
+One approval authorizes signing followed by automatic verified publication.
+An alpha versionName is retained while this development line is labelled alpha.
 
 Android releases do not deploy the backend or run database migrations. Confirm
 backend compatibility separately before releasing a client that needs new API

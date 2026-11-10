@@ -123,6 +123,9 @@ tasks.register<JacocoReport>("jacocoTestReport") {
         exclude("**/R.class", "**/R$*.class", "**/BuildConfig.*", "**/Manifest*.*")
     }, fileTree("build/tmp/kotlin-classes/debug") {
         exclude("**/R.class", "**/R$*.class", "**/BuildConfig.*", "**/Manifest*.*")
+    }, fileTree("build/intermediates/built_in_kotlinc/debug") {
+        include("**/*.class")
+        exclude("**/R.class", "**/R$*.class", "**/BuildConfig.*", "**/Manifest*.*")
     })
     executionData.setFrom(fileTree("build") {
         include("**/*.exec", "**/*.ec")

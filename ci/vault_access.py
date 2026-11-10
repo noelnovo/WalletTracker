@@ -29,7 +29,7 @@ class Vault:
         expected = {'GITLAB_CI': 'true', 'CI_PROJECT_ID': '31', 'CI_PROJECT_PATH': 'downops/wallet-tracker-android'}
         if any(os.environ.get(k) != v for k, v in expected.items()):
             raise RuntimeError('Verified GitLab android job identity required')
-        if role != 'wallettracker-android':
+        if role != 'wallettracker-android-gitlab-prod':
             raise RuntimeError('Unknown scoped delivery role')
         if os.environ.get('CI_PIPELINE_SOURCE') == 'merge_request_event':
             raise RuntimeError('Merge requests cannot obtain delivery credentials')
@@ -39,4 +39,10 @@ class Vault:
         self.token = request('https://vault.int.downops.win/v1/auth/gitlab-ci/login', 'POST', {'role': role, 'jwt': jwt})['auth']['client_token']
 
     def read(self, path):
+        if path != 'downops/data/apps/wallettracker/prod/mobile':
+            raise RuntimeError('Signing role cannot request scanner or unrelated secrets')
         return request('https://vault.int.downops.win/v1/' + path, headers={'X-Vault-Token': self.token})['data']['data']
+
+    def close(self):
+        request('https://vault.int.downops.win/v1/auth/token/revoke-self', 'POST', {},
+                headers={'X-Vault-Token': self.token})

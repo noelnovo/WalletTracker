@@ -1,110 +1,192 @@
-"""Protected-tag production APK signing and GitLab release; secrets stay out of argv, caches and logs."""
-import base64, hashlib, json, os, pathlib, re, subprocess, tempfile, urllib.request
-from ci.vault_access import Vault
+"""Immutable GitLab release controller. Candidate files are data, never imported."""
+import base64
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import tempfile
+import urllib.error
+import urllib.parse
+import urllib.request
 
-ROOT = pathlib.Path(os.getcwd())
-PROD_RECORD = 'downops/data/apps/wallettracker/prod/mobile'
-PREVIOUS_APK = 'https://github.com/noelnovo/WalletTracker/releases/download/v2.2.2/app-release-unsigned-signed.apk'
-PREVIOUS_APK_SHA256 = 'a4fe553370782f0d046a3fe181acde210a1db23024e5f92774edfedfd8007b51'
-EXPECTED_SIGNER = '60b988457cca109d8f3a1f3ad288f95648f9938990aeedff0dfc5ed479952b61'
-GITLAB_API = 'https://gitlab.downops.win/api/v4'
+from ci.vault_access import Vault, request
 
-
-def version():
-    text = (ROOT / 'app/build.gradle.kts').read_text()
-    return '.'.join(re.search(r'val ' + name + r'Version\s*=\s*(\d+)', text).group(1) for name in ('major', 'minor', 'patch'))
-
-
-def command(args, env=None):
-    process = subprocess.run(args, cwd=ROOT, env=env, capture_output=True, text=True)
-    if process.returncode:
-        raise RuntimeError('Production delivery command failed: ' + pathlib.Path(args[0]).name + '; sensitive diagnostics withheld')
-    return process.stdout.strip()
+SIGNER = '60b988457cca109d8f3a1f3ad288f95648f9938990aeedff0dfc5ed479952b61'
+RECORD = 'downops/data/apps/wallettracker/prod/mobile'
+API = 'https://gitlab.int.downops.win/api/v4/projects/31'
 
 
-def validate_identity(env):
-    tag = 'v' + version()
-    if os.environ.get('CI_COMMIT_TAG') != tag or not os.environ.get('CI_COMMIT_REF_PROTECTED') == 'true':
-        raise RuntimeError('Production signing requires the exact protected version tag')
-    sha = os.environ.get('CI_COMMIT_SHA', '')
-    if not re.fullmatch('[a-f0-9]{40}', sha):
-        raise RuntimeError('A verified source revision is required')
-    command(['git', 'fetch', 'origin', 'main'], env)
-    command(['git', 'merge-base', '--is-ancestor', sha, 'origin/main'], env)
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+def open_url(req):
+    return urllib.request.build_opener(NoRedirect()).open(req, timeout=120)
+
+
+def command(args, env):
+    result = subprocess.run(args, env=env, capture_output=True, text=True, timeout=120)
+    if result.returncode:
+        raise RuntimeError('Release tool failed; sensitive diagnostics withheld')
+    return result.stdout
+
+
+def version(root):
+    text = (root / 'app/build.gradle.kts').read_text()
+    return '.'.join(re.search(r'val ' + name + r'Version\s*=\s*(\d+)', text).group(1)
+                    for name in ('major', 'minor', 'patch'))
+
+
+def identity(root, env):
+    tag = env.get('CI_COMMIT_TAG', '')
+    revision = env.get('CI_COMMIT_SHA', '')
+    if (env.get('CI_PROJECT_ID') != '31' or env.get('CI_PIPELINE_SOURCE') != 'push'
+            or env.get('CI_COMMIT_REF_PROTECTED') != 'true'
+            or tag != 'v' + version(root) or not re.fullmatch(r'[0-9a-f]{40}', revision)):
+        raise RuntimeError('Exact protected version-tag release required')
+    remote = command(['git', '-C', str(root), 'ls-remote', 'origin', 'refs/heads/main'], env).split()
+    if len(remote) != 2 or remote[0] != revision:
+        raise RuntimeError('Release tag is not the current approved MAIN')
+    receipt = json.loads((root / 'security-output/receipt.json').read_text())
+    if any(receipt.get(key) != value for key, value in {
+            'project': '31', 'pipeline': env['CI_PIPELINE_ID'], 'head': revision,
+            'base': revision, 'target': 'main', 'event': 'push'}.items()):
+        raise RuntimeError('Release artifact identity mismatch')
     return tag
 
 
 def verify_backend():
-    request_url = 'https://api.downops.win/api/v1/ready'
-    with urllib.request.urlopen(urllib.request.Request(request_url, headers={'User-Agent': 'WalletTracker-Production-Release'}), timeout=30) as response:
-        if response.status != 200:
-            raise RuntimeError('Verified production API-v2 deployment is required before APK signing')
-
-
-def signed_release(vault, tag):
-    values = vault.read(PROD_RECORD)
-    if not all(values.get(key) for key in ('KEYSTORE_BASE64', 'KEYSTORE_PASSWORD', 'KEY_ALIAS')):
-        raise RuntimeError('Canonical production keystore record is incomplete')
-    env = os.environ.copy()
-    env.pop('VAULT_ID_TOKEN', None)
-    unsigned = next((ROOT / 'app/build/outputs/apk/release').glob('app-release-unsigned.apk'))
-    directory = pathlib.Path(tempfile.mkdtemp(prefix='.prod-signing-', dir=ROOT))
+    # No account registration or data writes. Readiness plus auth boundary only.
+    req = urllib.request.Request('https://api.downops.win/api/v1/ready',
+                                 headers={'User-Agent': 'Mozilla/5.0 WalletTracker-Release'})
+    with urllib.request.urlopen(req, timeout=30) as response:
+        if response.status != 200 or not json.load(response).get('success'):
+            raise RuntimeError('Production backend is not ready')
+    req = urllib.request.Request('https://api.downops.win/api/v2/sync',
+                                 headers={'User-Agent': 'Mozilla/5.0 WalletTracker-Release'})
     try:
-        keyfile = directory / 'prod.jks'
-        keyfile.write_bytes(base64.b64decode(''.join(values['KEYSTORE_BASE64'].split()), validate=True))
-        keyfile.chmod(0o600)
-        previous = directory / 'previous.apk'
-        with urllib.request.urlopen(PREVIOUS_APK, timeout=60) as response:
-            previous.write_bytes(response.read())
-        if hashlib.sha256(previous.read_bytes()).hexdigest() != PREVIOUS_APK_SHA256:
-            raise RuntimeError('Previous production release checksum mismatch')
-        sdk = pathlib.Path(env['ANDROID_HOME']) / 'build-tools/36.0.0'
-        signer(sdk / 'apksigner', previous, env)
-        signed = ROOT / 'artifacts' / ('app-release-signed-' + tag + '.apk')
-        signed.parent.mkdir(parents=True, exist_ok=True)
-        command([str(sdk / 'apksigner'), 'sign',
-                 '--ks', str(keyfile),
-                 '--ks-key-alias', values['KEY_ALIAS'],
-                 '--ks-pass', 'pass:' + values['KEYSTORE_PASSWORD'],
-                 '--key-pass', 'pass:' + (values.get('KEY_PASSWORD') or values['KEYSTORE_PASSWORD']),
-                 '--out', str(signed), str(unsigned)], env)
-        signer(sdk / 'apksigner', signed, env)
-        return signed
-    finally:
-        keyfile.unlink(missing_ok=True)
+        urllib.request.urlopen(req, timeout=30).close()
+    except urllib.error.HTTPError as error:
+        if error.code == 401:
+            return
+    raise RuntimeError('API-v2 authentication boundary is unavailable')
 
 
-def signer(apksigner, apk, env):
-    output = command([str(apksigner), 'verify', '--print-certs', str(apk)], env)
-    found = re.findall(r'Signer #\d+ certificate SHA-256 digest: ([a-fA-F0-9]{64})', output)
-    if len(found) != 1 or found[0].lower() != EXPECTED_SIGNER:
-        raise RuntimeError('APK signing identity differs from the published production app; update would be unsafe')
+def verify_apk(apk, sdk, env, release_version):
+    badging = command([str(sdk / 'aapt2'), 'dump', 'badging', str(apk)], env)
+    line = next((line for line in badging.splitlines() if line.startswith('package: ')), '')
+    fields = dict(re.findall(r"(\w+)='([^']*)'", line))
+    numbers = [int(value) for value in release_version.split('.')]
+    code = str(numbers[0] * 10000 + numbers[1] * 100 + numbers[2])
+    if (fields.get('name') != 'win.downops.wallettracker' or fields.get('versionCode') != code
+            or fields.get('versionName') not in [release_version, release_version + '-alpha']
+            or 'application-debuggable' in badging):
+        raise RuntimeError('Production APK package/version/debug state mismatch')
 
 
-def publish_gitlab_release(tag, signed, vault):
-    api = GITLAB_API + '/projects/' + str(os.environ['CI_PROJECT_ID'])
-    headers = {'Job-Token': os.environ['CI_JOB_TOKEN']}
-    request(api + '/releases', 'POST', {
-        'tag_name': tag, 'name': 'WalletTracker ' + tag[1:],
-        'description': (ROOT / 'docs/releases' / (tag[1:] + '.md')).read_text(),
-        'assets': {'links': [{'name': 'Signed release APK', 'url':
-            GITLAB_API.split('/api/v4')[0] + '/' + os.environ['CI_PROJECT_PATH'] + '/-/releases/' + tag + '/downloads/' + signed.name}]}}, headers)
+def verify_signature(apk, sdk, env):
+    output = command([str(sdk / 'apksigner'), 'verify', '--print-certs', str(apk)], env)
+    certs = re.findall(r'Signer #\d+ certificate SHA-256 digest: ([a-fA-F0-9]{64})', output)
+    if len(certs) != 1 or certs[0].lower() != SIGNER:
+        raise RuntimeError('Production APK signer mismatch')
+
+
+def sign(root, sdk, tag, vault):
+    unsigned = root / 'app/build/outputs/apk/release/app-release-unsigned.apk'
+    receipt = json.loads((root / 'release-input.json').read_text())
+    digest = hashlib.sha256(unsigned.read_bytes()).hexdigest()
+    if (receipt != {'sha': os.environ['CI_COMMIT_SHA'], 'pipeline': os.environ['CI_PIPELINE_ID'],
+                    'unsigned_sha256': digest}):
+        raise RuntimeError('Unsigned APK does not match the same-pipeline producer')
+    config = list((root / 'app/build/generated/source/buildConfig/release').rglob('BuildConfig.java'))
+    expected = ['String API_BASE_URL = "https://api.downops.win";', 'String API_VERSION = "2";',
+                'boolean REGISTRATION_UI_AVAILABLE = true;', 'String SIGN_SECRET = "";']
+    if len(config) != 1 or not all(item in config[0].read_text() for item in expected):
+        raise RuntimeError('Production API configuration mismatch')
+    env = {key: value for key, value in os.environ.items()
+           if key in ['PATH', 'JAVA_HOME', 'HOME', 'LANG']}
+    verify_apk(unsigned, sdk, env, tag[1:])
+    values = vault.read(RECORD)
+    env['PROD_STORE_PASSWORD'] = values['KEYSTORE_PASSWORD']
+    env['PROD_KEY_PASSWORD'] = values.get('KEY_PASSWORD') or values['KEYSTORE_PASSWORD']
+    output = root / 'artifacts'
+    output.mkdir()
+    target = output / ('WalletTracker-' + tag + '.apk')
+    with tempfile.TemporaryDirectory(prefix='wallet-signing-') as directory:
+        key = Path(directory) / 'production.p12'
+        key.write_bytes(base64.b64decode(values['KEYSTORE_BASE64'], validate=True))
+        key.chmod(0o600)
+        aligned = Path(directory) / 'aligned.apk'
+        command([str(sdk / 'zipalign'), '-p', '-f', '4', str(unsigned), str(aligned)], env)
+        command([str(sdk / 'apksigner'), 'sign', '--ks', str(key), '--ks-key-alias', values['KEY_ALIAS'],
+                 '--ks-pass', 'env:PROD_STORE_PASSWORD', '--key-pass', 'env:PROD_KEY_PASSWORD',
+                 '--out', str(target), str(aligned)], env)
+    verify_signature(target, sdk, env)
+    verify_apk(target, sdk, env, tag[1:])
+    checksum = hashlib.sha256(target.read_bytes()).hexdigest()
+    (output / (target.name + '.sha256')).write_text(checksum + '  ' + target.name + '\n')
+    (output / 'release-receipt.json').write_text(json.dumps({
+        'tag': tag, 'source_revision': os.environ['CI_COMMIT_SHA'],
+        'pipeline': os.environ['CI_PIPELINE_ID'], 'unsigned_sha256': digest,
+        'apk_sha256': checksum, 'signer_sha256': SIGNER}) + '\n')
+    return output
+
+
+def upload(tag, path, headers):
+    # PUT and subsequent authenticated GET use the SAME real endpoint. A release
+    # link is created only after the actual published bytes have been verified.
+    url = API + '/packages/generic/wallettracker-android/' + tag[1:] + '/' + path.name
+    req = urllib.request.Request(url, data=path.read_bytes(), method='PUT', headers=headers)
+    with open_url(req) as response:
+        if response.status != 201:
+            raise RuntimeError('Package upload did not create an immutable file')
+    with open_url(urllib.request.Request(url, headers=headers)) as response:
+        if hashlib.sha256(response.read()).digest() != hashlib.sha256(path.read_bytes()).digest():
+            raise RuntimeError('Published package checksum mismatch')
+    return {'name': path.name, 'url': url, 'direct_asset_path': '/' + path.name}
+
+
+def ensure_absent(tag, headers):
+    names = ['WalletTracker-' + tag + '.apk', 'WalletTracker-' + tag + '.apk.sha256', 'release-receipt.json']
+    urls = [API + '/releases/' + tag] + [API + '/packages/generic/wallettracker-android/'
+            + tag[1:] + '/' + name for name in names]
+    for url in urls:
+        try:
+            with open_url(urllib.request.Request(url, method='HEAD', headers=headers)):
+                raise RuntimeError('Release or package file already exists; overwrite refused')
+        except urllib.error.HTTPError as error:
+            if error.code != 404:
+                raise RuntimeError('Cannot prove release destination is unused') from None
 
 
 def main():
-    env = os.environ.copy()
-    tag = validate_identity(env)
+    root = Path(os.environ['CI_PROJECT_DIR'])
+    tag = identity(root, os.environ)
     verify_backend()
-    vault = Vault('wallettracker-android')
-    signed = signed_release(vault, tag)
-    publish_gitlab_release(tag, signed, vault)
-    digest = hashlib.sha256(signed.read_bytes()).hexdigest()
-    print(json.dumps({'release_published': True, 'tag': tag, 'apk_sha256': digest}))
+    headers = {'JOB-TOKEN': os.environ['CI_JOB_TOKEN']}
+    ensure_absent(tag, headers)
+    vault = Vault('wallettracker-android-gitlab-prod')
+    try:
+        output = sign(root, Path(os.environ['ANDROID_HOME']) / 'build-tools/36.0.0', tag, vault)
+    finally:
+        vault.close()
+    links = [upload(tag, path, headers) for path in sorted(output.iterdir())]
+    request(API + '/releases', 'POST', {'tag_name': tag, 'name': 'WalletTracker ' + tag[1:],
+            'description': (root / 'docs/releases' / (tag[1:] + '.md')).read_text(),
+            'assets': {'links': links}}, headers)
+    result = request(API + '/releases/' + tag, headers=headers)
+    if sorted(link['name'] for link in result['assets']['links']) != sorted(link['name'] for link in links):
+        raise RuntimeError('Published release links differ from verified package files')
+    print(json.dumps({'release_published': True, 'tag': tag, 'verified_files': len(links)}))
 
 
 if __name__ == '__main__':
     try:
         main()
-    except RuntimeError as error:
-        print(json.dumps({'release_failed': True, 'safe_error': str(error)}))
+    except Exception as error:
+        print(json.dumps({'release_failed': True, 'error_type': type(error).__name__,
+                          'reason': str(error) if type(error) is RuntimeError else 'Sensitive diagnostics withheld'}))
         raise SystemExit(1)

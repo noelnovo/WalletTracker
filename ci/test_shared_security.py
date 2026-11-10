@@ -1,43 +1,41 @@
-"""Android delivery runs on GitLab CI; the GitHub repository is a passive backup."""
+"""GitLab Android delivery retains trusted pre-merge and separate signing boundaries."""
 from pathlib import Path
-import re
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class GitlabDeliveryTests(unittest.TestCase):
-    def test_gitlab_pipeline_defines_the_full_delivery(self):
+    def test_scan_uses_the_canonical_generic_adapter(self):
         workflow = (ROOT / '.gitlab-ci.yml').read_text()
-        for stage in ('checks', 'build', 'security', 'publish'):
-            self.assertIn(stage, workflow)
-        self.assertIn('python3 -m scripts.ci.verify_contract', workflow)
-        self.assertIn('discover -s tests/automation', workflow)
-        self.assertIn('testDebugUnitTest jacocoTestReport', workflow)
-        self.assertIn('python3 -m ci.security_scan', workflow)
-        self.assertIn('python3 -m ci.release_publish', workflow)
-        # Gates and the release run only on protected branches and exact version tags.
-        self.assertIn("$CI_COMMIT_REF_PROTECTED == \"true\"", workflow)
-        self.assertIn("$CI_COMMIT_TAG =~ /^v[0-9]+\\.[0-9]+\\.[0-9]+$/", workflow)
-        self.assertIn('when: manual', workflow)
+        self.assertIn('project: downops/github-workflows', workflow)
+        self.assertIn('/gitlab/dependency-track-scan.yml', workflow)
+        self.assertIn('merge_request_event', workflow)
+        self.assertNotIn('python3 -m ci.security_scan', workflow)
 
-    def test_scanner_configuration_is_in_repo_and_scoped(self):
-        properties = (ROOT / 'sonar-project.properties').read_text()
-        self.assertIn('sonar.projectKey=noelpatata_WalletTracker_982bd7e1-4fb1-48a0-aebb-c34cdddfe86a', properties)
-        self.assertIn('sonar.coverage.jacoco.xmlReportPaths=app/build/reports/jacoco/jacocoTestReport/jacocoTestReport.xml', properties)
-        self.assertIn('sonar.coverage.exclusions=', properties)
+    def test_builds_are_bounded_and_signer_does_not_execute_candidate_code(self):
+        workflow = (ROOT / '.gitlab-ci.yml').read_text()
+        self.assertIn('--max-workers=1', workflow)
+        self.assertIn('-Xmx768m', workflow)
+        release = workflow.split('\nrelease:\n')[1]
+        self.assertIn('job: security', release)
+        self.assertIn('cache: []', release)
+        self.assertIn('cd "$DELIVERY_CONTROL_DIR" && python3 -m ci.release_publish', release)
 
-    def test_delivery_identity_is_pinned_to_the_android_gitlab_project(self):
-        access = (ROOT / 'ci' / 'vault_access.py').read_text()
-        self.assertIn("'CI_PROJECT_ID': '31'", access)
-        self.assertIn("'CI_PROJECT_PATH': 'downops/wallet-tracker-android'", access)
-        self.assertIn('auth/gitlab-ci/login', access)
-        self.assertIn("Merge requests cannot obtain delivery credentials", access)
-        release = (ROOT / 'ci' / 'release_publish.py').read_text()
-        self.assertIn('downops/data/apps/wallettracker/prod/mobile', release)
-        self.assertIn('60b988457cca109d8f3a1f3ad288f95648f9938990aeedff0dfc5ed479952b61', release)
+    def test_signing_uses_env_passwords_and_verified_package_upload(self):
+        release = (ROOT / 'ci/release_publish.py').read_text()
+        self.assertIn('env:PROD_STORE_PASSWORD', release)
+        self.assertNotIn("'pass:'", release)
+        self.assertIn('method=\'PUT\'', release)
+        self.assertIn('Published package checksum mismatch', release)
+        self.assertIn('Production APK signer mismatch', release)
 
-    def test_github_workflows_are_retired(self):
+    def test_signing_role_cannot_request_scan_credentials(self):
+        access = (ROOT / 'ci/vault_access.py').read_text()
+        self.assertIn('wallettracker-android-gitlab-prod', access)
+        self.assertIn('Signing role cannot request scanner or unrelated secrets', access)
+
+    def test_github_workflows_remain_retired(self):
         self.assertFalse((ROOT / '.github/workflows').exists() and any((ROOT / '.github/workflows').iterdir()))
 
 

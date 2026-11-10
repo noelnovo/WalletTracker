@@ -72,7 +72,7 @@ class ProductionSigningTests(unittest.TestCase):
         workflow = (build_prod.ROOT / '.gitlab-ci.yml').read_text()
         release = workflow.split('\nrelease:\n', 1)[1]
         self.assertIn('needs:', release)
-        self.assertIn('security-gates', release)
+        self.assertIn('job: security\n', release)
         self.assertIn('when: manual', release)
         self.assertIn('CI_COMMIT_REF_PROTECTED == "true"', release)
         self.assertIn('python3 -m ci.release_publish', release)
@@ -151,8 +151,10 @@ class ProductionSigningTests(unittest.TestCase):
 
     def test_shared_build_installs_source_validation_tools(self):
         workflow = (build_prod.ROOT / '.gitlab-ci.yml').read_text()
-        self.assertIn('platforms;android-36', workflow)
-        self.assertIn('build-tools;36.0.0', workflow)
+        setup = (build_prod.ROOT / 'ci/setup_android.py').read_text()
+        self.assertIn('platforms;android-36', setup)
+        self.assertIn('build-tools;36.0.0', setup)
+        self.assertIn('ci/setup_android.py', workflow)
         self.assertNotIn('persist-credentials: true', workflow)
         self.assertEqual(workflow.count('testDebugUnitTest jacocoTestReport'), 1)
 
