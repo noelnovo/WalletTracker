@@ -69,17 +69,14 @@ class ProductionSigningTests(unittest.TestCase):
         self.assertNotIn('/dev/', build_prod.PROD_RECORD)
 
     def test_ci_publication_requires_credential_and_protected_release_gates(self):
-        workflow = (build_prod.ROOT / '.github/workflows/android.yml').read_text()
-        publication = workflow.split('\n  publish-prod:\n', 1)[1]
-        self.assertIn('needs: prod-apk', publication)
-        self.assertIn('contents: write', publication)
-        self.assertIn('GH_TOKEN: ${{ github.token }}', publication)
-        self.assertNotIn('id-token: write', publication)
+        workflow = (build_prod.ROOT / '.gitlab-ci.yml').read_text()
+        release = workflow.split('\nrelease:\n', 1)[1]
+        self.assertIn('needs:', release)
+        self.assertIn('security-gates', release)
+        self.assertIn('when: manual', release)
+        self.assertIn('CI_COMMIT_REF_PROTECTED == "true"', release)
+        self.assertIn('python3 -m ci.release_publish', release)
         self.assertNotIn('GITHUB_RELEASE_TOKEN', workflow)
-        context = workflow.split('\n  release-context:\n', 1)[1].split('\n  prod-apk:\n', 1)[0]
-        self.assertIn('validate_identity(os.environ)', context)
-        self.assertNotIn('vault-action', context)
-        self.assertIn('needs: release-context', workflow.split('\n  prod-apk:\n', 1)[1].split('\n  publish-prod:\n', 1)[0])
 
     def test_check_tag_cannot_authorize_a_real_release(self):
         with patch.object(build_prod, 'command') as command:
@@ -147,18 +144,17 @@ class ProductionSigningTests(unittest.TestCase):
             self.assertEqual(receipt['registration_authority'], 'backend')
             self.assertNotIn('registration_enabled', receipt)
 
-    def test_gitlab_is_passive_backup_only(self):
-        self.assertFalse((build_prod.ROOT / '.gitlab-ci.yml').exists())
-        self.assertFalse((build_prod.ROOT / '.gitlab/ci/pipeline.yml').exists())
-        self.assertTrue((build_prod.ROOT / '.github/workflows/validation.yml').is_file())
-        self.assertTrue((build_prod.ROOT / '.github/workflows/android.yml').is_file())
+    def test_gitlab_is_the_ci_owner_and_github_is_the_backup(self):
+        self.assertTrue((build_prod.ROOT / '.gitlab-ci.yml').is_file())
+        self.assertFalse((build_prod.ROOT / '.github/workflows/android.yml').exists())
+        self.assertFalse((build_prod.ROOT / '.github/workflows/validation.yml').exists())
 
-    def test_shared_android_image_installs_source_validation_tools(self):
-        workflow = (build_prod.ROOT / '.github/workflows/android.yml').read_text()
-        self.assertIn('runs-on: ubuntu-latest', workflow)
-        self.assertIn('fetch-depth: 0', workflow)
+    def test_shared_build_installs_source_validation_tools(self):
+        workflow = (build_prod.ROOT / '.gitlab-ci.yml').read_text()
+        self.assertIn('platforms;android-36', workflow)
+        self.assertIn('build-tools;36.0.0', workflow)
         self.assertNotIn('persist-credentials: true', workflow)
-        self.assertEqual(workflow.count('uses: android-actions/setup-android@v3'), workflow.count('packages: platform-tools'))
+        self.assertEqual(workflow.count('testDebugUnitTest jacocoTestReport'), 1)
 
     def test_release_configuration_describes_ui_not_server_permission(self):
         valid = '\n'.join(('String API_BASE_URL = "https://api.downops.win";',
