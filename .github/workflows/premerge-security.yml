@@ -1,92 +1,19 @@
 name: WalletTracker trusted pre-merge security
 on:
-  pull_request_target:
+  pull_request:
     branches: [dev, main]
-    # Drafts are analyzed too; marking the same revision ready need not rebuild.
     types: [opened, synchronize, reopened, edited]
 permissions:
   contents: read
-concurrency:
-  group: wallettracker-premerge-${{ github.event.pull_request.number }}
-  queue: max
-  cancel-in-progress: false
 jobs:
-  context:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: read
-      statuses: write
-    outputs:
-      candidate: ${{ steps.context.outputs.candidate }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - id: context
-        run: python3 ci/premerge_security.py prepare
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-
-  build:
-    needs: context
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    # This job executes PR-controlled Gradle/Python code. No OIDC, status write,
-    # Vault, scanner, settings, signing or release credential is granted here.
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.context.outputs.candidate }}
-          persist-credentials: false
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
-      - uses: android-actions/setup-android@v3
-        with:
-          packages: platform-tools
-      - run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
-      - run: python3 -m unittest discover -s tests/automation -p 'test_*.py'
-      - run: python3 -m unittest discover -s ci -p 'test_*.py'
-      - run: sh gradlew --no-daemon --max-workers=2 '-Dorg.gradle.jvmargs=-Xmx1536m -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8' -Pkotlin.compiler.execution.strategy=in-process testDebugUnitTest cyclonedxBom
-      - uses: actions/upload-artifact@v4
-        with:
-          name: premerge-security-${{ needs.context.outputs.candidate }}-${{ github.run_attempt }}
-          path: |
-            build/reports/cyclonedx/bom.json
-            app/build/intermediates/javac/**/classes/**
-            app/build/tmp/kotlin-classes/**
-            app/build/intermediates/built_in_kotlinc/**/classes/**
-          if-no-files-found: error
-          retention-days: 7
-
   security:
-    if: always()
-    needs: [context, build]
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    concurrency:
-      group: wallettracker-security-analysis
-      queue: max
-      cancel-in-progress: false
+    name: Security
     permissions:
       contents: read
       pull-requests: read
       actions: read
       statuses: write
       id-token: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          # Never check out a PR ref in this credentialed job.
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - run: python3 ci/premerge_security.py gate
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          PREMERGE_BUILD_RESULT: ${{ needs.build.result }}
-          PREMERGE_CANDIDATE: ${{ needs.context.outputs.candidate }}
+    # Literal shared control, not scripts/configuration supplied by the PR.
+    # Required security/sonarqube-dtrack-{dev,main} statuses stay unchanged.
+    uses: noelnovo/.github/.github/workflows/dependency-track-scan.yml@55425668e1d0aaac5a60c7eec35b91a99d483b79
