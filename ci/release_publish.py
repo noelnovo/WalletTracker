@@ -17,6 +17,7 @@ from ci.vault_access import Vault, request
 SIGNER = '60b988457cca109d8f3a1f3ad288f95648f9938990aeedff0dfc5ed479952b61'
 RECORD = 'downops/data/apps/wallettracker/prod/mobile'
 API = 'https://gitlab.int.downops.win/api/v4/projects/31'
+PUBLIC_API = 'https://gitlab.downops.win/api/v4/projects/31'
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -25,6 +26,8 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 def open_url(req):
+    if isinstance(req, urllib.request.Request):
+        req.add_header('User-Agent', 'Mozilla/5.0 WalletTracker-Android-Release')
     return urllib.request.build_opener(NoRedirect()).open(req, timeout=120)
 
 
@@ -148,7 +151,54 @@ def upload(tag, path, headers):
     with open_url(urllib.request.Request(url, headers=headers)) as response:
         if hashlib.sha256(response.read()).digest() != hashlib.sha256(path.read_bytes()).digest():
             raise RuntimeError('Published package checksum mismatch')
-    return {'name': path.name, 'url': url, 'direct_asset_path': '/' + path.name}
+    public = PUBLIC_API + '/packages/generic/wallettracker-android/' + tag[1:] + '/' + path.name
+    with open_url(urllib.request.Request(public, headers=headers)) as response:
+        if hashlib.sha256(response.read()).digest() != hashlib.sha256(path.read_bytes()).digest():
+            raise RuntimeError('Public release download checksum mismatch')
+    return {'name': path.name, 'url': public, 'direct_asset_path': '/' + path.name}
+
+
+def resume_package(root, sdk, tag, headers):
+    """Owner-authorized metadata retry: no Vault login, key access or re-signing."""
+    expected = os.environ['CI_PIPELINE_ID'] + ':' + os.environ['CI_COMMIT_SHA'] + ':' + tag
+    if os.environ.get('RELEASE_RESUME_VERIFIED_PACKAGE') != expected:
+        raise RuntimeError('Resume approval does not match exact pipeline/source/tag')
+    output = root / 'artifacts'
+    output.mkdir()
+    names = ['WalletTracker-' + tag + '.apk', 'WalletTracker-' + tag + '.apk.sha256', 'release-receipt.json']
+    for name in names:
+        url = API + '/packages/generic/wallettracker-android/' + tag[1:] + '/' + name
+        with open_url(urllib.request.Request(url, headers=headers)) as response:
+            raw = response.read(32 * 1024 * 1024 + 1)
+        if len(raw) > 32 * 1024 * 1024:
+            raise RuntimeError('Existing release file exceeds bounds')
+        (output / name).write_bytes(raw)
+    receipt = json.loads((output / 'release-receipt.json').read_text())
+    target = output / names[0]
+    digest = hashlib.sha256(target.read_bytes()).hexdigest()
+    unsigned = root / 'app/build/outputs/apk/release/app-release-unsigned.apk'
+    if (receipt.get('source_revision') != os.environ['CI_COMMIT_SHA']
+            or receipt.get('pipeline') != os.environ['CI_PIPELINE_ID'] or receipt.get('tag') != tag
+            or receipt.get('signer_sha256') != SIGNER or receipt.get('apk_sha256') != digest
+            or receipt.get('unsigned_sha256') != hashlib.sha256(unsigned.read_bytes()).hexdigest()
+            or (output / names[1]).read_text().split()[0] != digest):
+        raise RuntimeError('Existing signed package source/signature/digest receipt mismatch')
+    env = {key: value for key, value in os.environ.items() if key in ['PATH', 'JAVA_HOME', 'HOME', 'LANG']}
+    verify_signature(target, sdk, env)
+    verify_apk(target, sdk, env, tag[1:])
+    print(json.dumps({'existing_signed_package_verified': True, 'apk_sha256': digest, 'signing_repeated': False}))
+    return output
+
+
+def existing_links(tag, output, headers):
+    links = []
+    for path in sorted(output.iterdir()):
+        url = PUBLIC_API + '/packages/generic/wallettracker-android/' + tag[1:] + '/' + path.name
+        with open_url(urllib.request.Request(url, headers=headers)) as response:
+            if hashlib.sha256(response.read()).digest() != hashlib.sha256(path.read_bytes()).digest():
+                raise RuntimeError('Existing public release bytes differ')
+        links.append({'name': path.name, 'url': url, 'direct_asset_path': '/' + path.name})
+    return links
 
 
 def ensure_absent(tag, headers):
@@ -169,16 +219,33 @@ def main():
     tag = identity(root, os.environ)
     verify_backend()
     headers = {'JOB-TOKEN': os.environ['CI_JOB_TOKEN']}
-    ensure_absent(tag, headers)
-    vault = Vault('wallettracker-android-gitlab-prod')
-    try:
-        output = sign(root, Path(os.environ['ANDROID_HOME']) / 'build-tools/36.0.0', tag, vault)
-    finally:
-        vault.close()
-    links = [upload(tag, path, headers) for path in sorted(output.iterdir())]
-    request(API + '/releases', 'POST', {'tag_name': tag, 'name': 'WalletTracker ' + tag[1:],
-            'description': (root / 'docs/releases' / (tag[1:] + '.md')).read_text(),
-            'assets': {'links': links}}, headers)
+    sdk = Path(os.environ['ANDROID_HOME']) / 'build-tools/36.0.0'
+    if os.environ.get('RELEASE_RESUME_VERIFIED_PACKAGE'):
+        output = resume_package(root, sdk, tag, headers)
+        links = existing_links(tag, output, headers)
+    else:
+        ensure_absent(tag, headers)
+        vault = Vault('wallettracker-android-gitlab-prod')
+        try:
+            output = sign(root, sdk, tag, vault)
+        finally:
+            vault.close()
+        links = [upload(tag, path, headers) for path in sorted(output.iterdir())]
+    existing = None
+    if os.environ.get('RELEASE_RESUME_VERIFIED_PACKAGE'):
+        try:
+            existing = request(API + '/releases/' + tag, headers=headers)
+        except RuntimeError as error:
+            if 'HTTP 404' not in str(error):
+                raise
+    if existing is None:
+        request(API + '/releases', 'POST', {'tag_name': tag, 'name': 'WalletTracker ' + tag[1:],
+                'description': (root / 'docs/releases' / (tag[1:] + '.md')).read_text(),
+                'assets': {'links': links}}, headers)
+    else:
+        actual = {(link['name'], link['url']) for link in existing['assets']['links']}
+        if actual != {(link['name'], link['url']) for link in links} or existing['commit']['id'] != os.environ['CI_COMMIT_SHA']:
+            raise RuntimeError('Existing release metadata differs; overwrite refused')
     result = request(API + '/releases/' + tag, headers=headers)
     if sorted(link['name'] for link in result['assets']['links']) != sorted(link['name'] for link in links):
         raise RuntimeError('Published release links differ from verified package files')

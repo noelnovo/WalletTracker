@@ -55,10 +55,11 @@ class ReleaseTests(unittest.TestCase):
             status=201
         with tempfile.TemporaryDirectory() as directory:
             path=Path(directory)/'synthetic.apk';path.write_bytes(b'synthetic APK')
-            with patch.object(subject,'open_url',side_effect=[Response(b'created'),Response(path.read_bytes())]):
+            with patch.object(subject,'open_url',side_effect=[Response(b'created'),Response(path.read_bytes()),Response(path.read_bytes())]):
                 link=subject.upload('v3.2.0',path,{})
                 self.assertEqual(link['name'],path.name)
                 self.assertEqual(link['direct_asset_path'],'/'+path.name)
+                self.assertTrue(link['url'].startswith(subject.PUBLIC_API))
             for responses in [[Response(b'created'),Response(b'changed')]]:
                 with patch.object(subject,'open_url',side_effect=responses),self.assertRaises(RuntimeError):
                     subject.upload('v3.2.0',path,{})
@@ -161,6 +162,60 @@ class ReleaseTests(unittest.TestCase):
             run.return_value.stdout='synthetic diagnostic'
             with self.assertRaisesRegex(RuntimeError,'sensitive diagnostics withheld'):
                 subject.command(['synthetic-tool'],{})
+
+    def test_resume_existing_package_verifies_source_digest_and_signer_without_signing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);unsigned=root/'app/build/outputs/apk/release/app-release-unsigned.apk'
+            unsigned.parent.mkdir(parents=True);unsigned.write_bytes(b'synthetic unsigned')
+            signed=b'synthetic already-signed';digest=hashlib.sha256(signed).hexdigest()
+            receipt={'tag':'v3.2.0','source_revision':'a'*40,'pipeline':'9','signer_sha256':subject.SIGNER,
+                     'apk_sha256':digest,'unsigned_sha256':hashlib.sha256(unsigned.read_bytes()).hexdigest()}
+            files={'WalletTracker-v3.2.0.apk':signed,'WalletTracker-v3.2.0.apk.sha256':(digest+'  WalletTracker-v3.2.0.apk\n').encode(),
+                   'release-receipt.json':json.dumps(receipt).encode()}
+            def open_url(req):return io.BytesIO(files[req.full_url.rsplit('/',1)[1]])
+            env=dict(self.env(),RELEASE_RESUME_VERIFIED_PACKAGE='9:'+'a'*40+':v3.2.0')
+            with patch.dict(os.environ,env,clear=True),patch.object(subject,'open_url',side_effect=open_url), \
+                 patch.object(subject,'verify_signature') as signature,patch.object(subject,'verify_apk') as apk, \
+                 patch.object(subject,'Vault') as vault,patch.object(subject,'sign') as sign,patch('builtins.print'):
+                output=subject.resume_package(root,Path('/sdk'),'v3.2.0',{})
+                signature.assert_called_once();apk.assert_called_once();vault.assert_not_called();sign.assert_not_called()
+                links=subject.existing_links('v3.2.0',output,{})
+                self.assertEqual(3,len(links))
+                self.assertTrue(all(link['url'].startswith(subject.PUBLIC_API) for link in links))
+
+    def test_resume_approval_must_bind_the_exact_pipeline_source_and_tag(self):
+        with tempfile.TemporaryDirectory() as directory,patch.dict(os.environ,self.env(),clear=True), \
+             patch.object(subject,'open_url') as download,self.assertRaises(RuntimeError):
+            subject.resume_package(Path(directory),Path('/sdk'),'v3.2.0',{})
+        download.assert_not_called()
+
+    def test_metadata_resume_main_never_logs_into_vault_or_uploads_again(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);notes=root/'docs/releases';notes.mkdir(parents=True)
+            (notes/'3.2.0.md').write_text('Synthetic notes');output=root/'artifacts';output.mkdir()
+            link={'name':'synthetic.apk','url':subject.PUBLIC_API+'/synthetic.apk'}
+            env=dict(self.env(),CI_PROJECT_DIR=directory,CI_JOB_TOKEN='synthetic-job',ANDROID_HOME='/sdk',
+                     RELEASE_RESUME_VERIFIED_PACKAGE='9:'+'a'*40+':v3.2.0')
+            with patch.dict(os.environ,env,clear=True),patch.object(subject,'identity',return_value='v3.2.0'), \
+                 patch.object(subject,'verify_backend'),patch.object(subject,'resume_package',return_value=output), \
+                 patch.object(subject,'existing_links',return_value=[link]),patch.object(subject,'Vault') as vault, \
+                 patch.object(subject,'sign') as sign,patch.object(subject,'upload') as upload, \
+                 patch.object(subject,'request',side_effect=[RuntimeError('HTTP 404'),{}, {'assets':{'links':[link]}}]), \
+                 patch('builtins.print'):
+                subject.main()
+                vault.assert_not_called();sign.assert_not_called();upload.assert_not_called()
+
+    def test_resume_rejects_tampered_receipt_before_signature_or_publication(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);unsigned=root/'app/build/outputs/apk/release/app-release-unsigned.apk'
+            unsigned.parent.mkdir(parents=True);unsigned.write_bytes(b'synthetic unsigned')
+            files={'WalletTracker-v3.2.0.apk':b'synthetic signed','WalletTracker-v3.2.0.apk.sha256':b'0'*64,
+                   'release-receipt.json':b'{"source_revision":"wrong"}'}
+            with patch.dict(os.environ,dict(self.env(),RELEASE_RESUME_VERIFIED_PACKAGE='9:'+'a'*40+':v3.2.0'),clear=True), \
+                 patch.object(subject,'open_url',side_effect=lambda req:io.BytesIO(files[req.full_url.rsplit('/',1)[1]])), \
+                 patch.object(subject,'verify_signature') as signature,self.assertRaises(RuntimeError):
+                subject.resume_package(root,Path('/sdk'),'v3.2.0',{})
+            signature.assert_not_called()
 
 
 if __name__ == '__main__':
