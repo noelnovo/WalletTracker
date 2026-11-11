@@ -2,7 +2,7 @@
 # MRs cannot substitute a fake passing pipeline or execute source with scan keys.
 include:
   - project: downops/github-workflows
-    ref: 4bebcb4341af9409fef40bc9e40ac8dd873f9088
+    ref: 95590ca0c2c02109431a740c2ae0868d89e1ac97
     file: /gitlab/dependency-track-scan.yml
 
 stages: [checks, test, build, security, publish]
