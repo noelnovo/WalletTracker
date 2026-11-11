@@ -15,7 +15,7 @@ workflow:
 .delivery-control:
   variables:
     GIT_DEPTH: "0"
-    DELIVERY_CONTROL_SHA: 60491af15f58f47f52498c266b88975c8232fdfc
+    DELIVERY_CONTROL_SHA: b218d0e512f179b17228fef05e2e855dc6336429
   before_script:
     - apt-get update -qq && apt-get install -y -qq --no-install-recommends python3 git ca-certificates > /dev/null
     - |
