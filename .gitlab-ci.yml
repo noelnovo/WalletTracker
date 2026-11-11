@@ -2,7 +2,7 @@
 # MRs cannot substitute a fake passing pipeline or execute source with scan keys.
 include:
   - project: downops/github-workflows
-    ref: dbd8e7761fdcd57d3b81fe44d967b86cfad3818a
+    ref: 4bebcb4341af9409fef40bc9e40ac8dd873f9088
     file: /gitlab/dependency-track-scan.yml
 
 stages: [checks, test, build, security, publish]
@@ -29,9 +29,14 @@ checks:
   stage: checks
   image: python:3.13-alpine
   script:
-    - python3 -m scripts.ci.verify_contract
-    - python3 -m unittest discover -s tests/automation -p 'test_*.py'
-    - python3 -m unittest discover -s ci -p 'test_*.py'
+    - pip install --quiet coverage==7.16.2
+    - python3 -m coverage run --source=. -m scripts.ci.verify_contract
+    - python3 -m coverage run --append --source=. -m unittest discover -s tests/automation -p 'test_*.py'
+    - python3 -m coverage run --append --source=. -m unittest discover -s ci -p 'test_*.py'
+    - python3 -m coverage xml --include='ci/*.py,scripts/**/*.py' --omit='ci/test_*.py' -o coverage/python.xml
+  artifacts:
+    paths: [coverage/python.xml]
+    expire_in: 7 days
 
 .android-build:
   extends: .delivery-control
@@ -85,6 +90,8 @@ release-build:
 security-build:
   stage: build
   needs:
+    - job: checks
+      artifacts: true
     - job: unit-tests
       artifacts: true
     - job: release-build

@@ -67,6 +67,11 @@ metrics or failed/cancelled/skipped producers cannot authorize publication.
 Fast-forward-only, successful-pipeline-required merges ensure that the tested
 candidate contains the current target. Advancing either target or source requires
 fresh checks. The unchanged assigned Sonar quality gate owns all thresholds.
+Automation coverage is real coverage.py output for every production Python helper
+under `ci/` and `scripts/`; only actual unit-test files are omitted from that report.
+The scanner validates each source path and hit/count record against candidate
+source and same-pipeline digests. It does not fabricate coverage or execute tests
+with scanner/signing credentials.
 The accepted shared privileged runner remains a trusted administrative boundary,
 not isolation against a malicious runner administrator or project Maintainer.
 

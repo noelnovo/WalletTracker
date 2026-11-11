@@ -10,6 +10,8 @@ class GitlabDeliveryTests(unittest.TestCase):
         workflow = (ROOT / '.gitlab-ci.yml').read_text()
         self.assertIn('project: downops/github-workflows', workflow)
         self.assertIn('/gitlab/dependency-track-scan.yml', workflow)
+        self.assertIn('coverage xml', workflow)
+        self.assertIn('coverage/python.xml', workflow)
         self.assertIn('merge_request_event', workflow)
         self.assertNotIn('python3 -m ci.security_scan', workflow)
 
