@@ -19,7 +19,6 @@ import win.downops.wallettracker.data.models.Expense
 import win.downops.wallettracker.data.api.communication.responses.BaseResponse
 
 private const val DATE_FORMAT = "yyyy-MM-dd"
-private const val NO_DATA = "No data"
 
 @RequiresApi(Build.VERSION_CODES.O)
 class ExpenseHttpService @Inject constructor(
@@ -93,42 +92,22 @@ class ExpenseHttpService @Inject constructor(
     }
 
     override suspend fun deleteById(expenseId: Long): AppResult<Unit> {
-        val response = endpoint.deleteById("Bearer ${getToken()}", getCipheredText(), encryptData(ExpenseIdRequest(expenseId)) ?: throw Exception(authenticationErrorMessage))
-        if (response.code() == 401) {
-            val refresh = ApiClient.login.refresh("Bearer ${getToken()}")
-            if (refresh.isSuccessful && refresh.body()?.success == true) {
-                val newToken = refresh.body()?.data?.token
-                if (newToken != null) {
-                    val currentSession = session
-                    currentSession.token = newToken
-                    sessionRepository.edit(currentSession)
-                    val retryResponse = endpoint.deleteById("Bearer ${newToken}", getCipheredText(), encryptData(ExpenseIdRequest(expenseId)) ?: throw Exception(authenticationErrorMessage))
-                    val body = retryResponse.body() ?: return AppResult.Error(NO_DATA, code = retryResponse.code())
-                    return if (body.success) AppResult.Success(body.message, Unit) else AppResult.Error(body.message, code = retryResponse.code())
-                }
+        return safeApiCall { token ->
+            endpoint.deleteById("Bearer $token", getCipheredText(), encryptData(ExpenseIdRequest(expenseId)) ?: throw Exception(authenticationErrorMessage))
+        }.let { result ->
+            when (result) {
+                is AppResult.Success -> AppResult.Success(result.message, Unit)
+                is AppResult.Error -> result
             }
         }
-        val body = response.body() ?: return AppResult.Error(NO_DATA, code = response.code())
-        return if (body.success) AppResult.Success(body.message, Unit) else AppResult.Error(body.message, code = response.code())
     }
 
     override suspend fun deleteAll(): AppResult<Unit> {
-        val response = endpoint.deleteAll("Bearer ${getToken()}", getCipheredText())
-        if (response.code() == 401) {
-             val refresh = ApiClient.login.refresh("Bearer ${getToken()}")
-             if (refresh.isSuccessful && refresh.body()?.success == true) {
-                 val newToken = refresh.body()?.data?.token
-                 if (newToken != null) {
-                     val currentSession = session
-                     currentSession.token = newToken
-                     sessionRepository.edit(currentSession)
-                    val retryResponse = endpoint.deleteAll("Bearer ${newToken}", getCipheredText())
-                     val body = retryResponse.body() ?: return AppResult.Error(NO_DATA, code = retryResponse.code())
-                     return if (body.success) AppResult.Success(body.message, Unit) else AppResult.Error(body.message, code = retryResponse.code())
-                 }
-             }
+        return safeApiCall { token -> endpoint.deleteAll("Bearer $token", getCipheredText()) }.let { result ->
+            when (result) {
+                is AppResult.Success -> AppResult.Success(result.message, Unit)
+                is AppResult.Error -> result
+            }
         }
-        val body = response.body() ?: return AppResult.Error(NO_DATA, code = response.code())
-        return if (body.success) AppResult.Success(body.message, Unit) else AppResult.Error(body.message, code = response.code())
     }
 }

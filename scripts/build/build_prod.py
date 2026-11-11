@@ -92,7 +92,8 @@ def signer(apksigner, apk, env):
 def validate_built_configuration(sdk, apk, env, *, config_path=None):
     badging = command([str(sdk / 'aapt2'), 'dump', 'badging', str(apk)], env)
     package_line = next((line for line in badging.splitlines() if line.startswith('package: ')), '')
-    package = dict(part.split('=', 1) for part in shlex.split(package_line.removeprefix('package: ')) if '=' in part)
+    properties = (part.split('=', 1) for part in shlex.split(package_line.removeprefix('package: ')) if '=' in part)
+    package = {key: value for key, value in properties}
     if package.get('name') != 'win.downops.wallettracker' or 'application-debuggable' in badging:
         raise RuntimeError('Production APK package/debug state is unsafe')
     if package.get('versionName') != version() or package.get('versionCode') != str(version_code(version())):

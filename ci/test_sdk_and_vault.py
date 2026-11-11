@@ -112,6 +112,8 @@ class VaultTests(unittest.TestCase):
         class Connection:
             def __init__(self,host,port,context,timeout):
                 self.host=host;self.port=port;self._context=context;instances.append(self)
+                self._create_connection=access.socket.create_connection
+            def connect(self):self._create_connection((self.host,self.port),timeout=30,source_address=None)
             def request(self,*args,**kwargs):self.sent=(args,kwargs)
             def getresponse(self):return Response()
             def close(self):self.closed=True

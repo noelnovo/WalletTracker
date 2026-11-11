@@ -21,10 +21,16 @@ import win.downops.wallettracker.data.api.communication.responses.CipheredRespon
 import win.downops.wallettracker.data.api.communication.responses.LoginResponse
 import win.downops.wallettracker.data.api.expense.ExpenseEndpoints
 import win.downops.wallettracker.data.api.expense.ExpenseHttpService
+import win.downops.wallettracker.data.api.expenseCategory.ExpenseCategoryEndpoints
+import win.downops.wallettracker.data.api.expenseCategory.ExpenseCategoryHttpService
+import win.downops.wallettracker.data.api.importe.ImporteEndpoints
+import win.downops.wallettracker.data.api.importe.ImporteHttpService
 import win.downops.wallettracker.data.api.season.SeasonEndpoints
 import win.downops.wallettracker.data.api.season.SeasonHttpService
 import win.downops.wallettracker.data.models.AppResult
 import win.downops.wallettracker.data.models.Expense
+import win.downops.wallettracker.data.models.ExpenseCategory
+import win.downops.wallettracker.data.models.Importe
 import win.downops.wallettracker.data.models.Season
 import win.downops.wallettracker.data.models.Session
 import win.downops.wallettracker.util.Cryptography
@@ -57,6 +63,13 @@ class HttpRepositoryContractTest {
     }
 
     private fun sessions() = Sessions(clientKeys[0], serverKeys[1])
+    @Test fun lazyRetrofitClientsAreStableAndDoNotSendRequestsOnConstruction() {
+        assertSame(ApiClient.login, ApiClient.login)
+        assertSame(ApiClient.expense, ApiClient.expense)
+        assertSame(ApiClient.expenseCategory, ApiClient.expenseCategory)
+        assertSame(ApiClient.importe, ApiClient.importe)
+        assertSame(ApiClient.season, ApiClient.season)
+    }
     private fun <T> rejected(code: Int): Response<T> = Response.error(code, "{}".toResponseBody("application/json".toMediaType()))
     private fun encrypted(json: String) = CipheredResponse(
         Cryptography.sign(serverKeys[0]), requireNotNull(Cryptography.hybridEncrypt(clientKeys[1], json)))
@@ -184,5 +197,59 @@ class HttpRepositoryContractTest {
         success = true; absent = true
         assertTrue((service.getAll() as AppResult.Success).data.isEmpty())
         assertNull((service.getById(7L) as AppResult.Success).data)
+    }
+
+    @Test fun categoryEndpointsRetainNamesListsAndControlledDeletionErrors() = runBlocking {
+        val category = ExpenseCategory(7L).apply { setName("Synthetic category"); setOrder(2) }
+        var success = true; var absent = false
+        val endpoint = Mockito.mock(ExpenseCategoryEndpoints::class.java, Answer<Any?> { call ->
+            if (call.method.name == "deleteById") {
+                if (absent) Response.success<BaseResponse<Unit>>(null)
+                else Response.success(BaseResponse(data = Unit, message = "Synthetic", success = success))
+            } else {
+                val data = if (absent) null else if (call.method.name == "getExpenseCategories") listOf(category) else category
+                response(GsonBuilder().create().toJson(BaseResponse(data = data, message = "Synthetic", success = success)))
+            }
+        })
+        val service = ExpenseCategoryHttpService(sessions().repository, endpoint)
+        assertEquals(1, (service.getAll() as AppResult.Success).data.size)
+        assertEquals("Synthetic category", (service.getById(7L) as AppResult.Success).data!!.name)
+        assertTrue(service.create(category) is AppResult.Success); assertTrue(service.edit(category) is AppResult.Success)
+        assertTrue(service.deleteById(7L) is AppResult.Success)
+        success = false
+        assertTrue(service.getAll() is AppResult.Error); assertTrue(service.getById(7L) is AppResult.Error)
+        assertTrue(service.create(category) is AppResult.Error); assertTrue(service.edit(category) is AppResult.Error)
+        assertTrue(service.deleteById(7L) is AppResult.Error)
+        success = true; absent = true
+        assertTrue((service.getAll() as AppResult.Success).data.isEmpty())
+        assertNull((service.getById(7L) as AppResult.Success).data)
+        assertTrue(service.deleteById(7L) is AppResult.Error)
+    }
+
+    @Test fun incomeEndpointsPreserveAmountsAndEmptySeasonLists() = runBlocking {
+        val income = Importe(7L, "Synthetic income", Date.valueOf("2026-01-02"), 25.0, 37.5, 7L)
+        var success = true; var absent = false
+        val endpoint = Mockito.mock(ImporteEndpoints::class.java, Answer<Any?> { call ->
+            if (call.method.name.startsWith("delete")) {
+                if (absent) Response.success<BaseResponse<Unit>>(null)
+                else Response.success(BaseResponse(data = Unit, message = "Synthetic", success = success))
+            } else {
+                val data = if (absent) null else if (call.method.name == "getBySeasonId") listOf(income) else income
+                response(GsonBuilder().setDateFormat("yyyy-MM-dd").create().toJson(BaseResponse(data = data, message = "Synthetic", success = success)))
+            }
+        })
+        val service = ImporteHttpService(sessions().repository, endpoint)
+        assertEquals(1, (service.getBySeasonId(7L) as AppResult.Success).data.size)
+        assertEquals(25.0, (service.getById(7L) as AppResult.Success).data!!.amount, 0.0)
+        assertTrue(service.create(income) is AppResult.Success)
+        assertTrue(service.deleteById(7L) is AppResult.Success); assertTrue(service.deleteBySeasonId(7L) is AppResult.Success)
+        success = false
+        assertTrue(service.getBySeasonId(7L) is AppResult.Error); assertTrue(service.getById(7L) is AppResult.Error)
+        assertTrue(service.create(income) is AppResult.Error)
+        assertTrue(service.deleteById(7L) is AppResult.Error); assertTrue(service.deleteBySeasonId(7L) is AppResult.Error)
+        success = true; absent = true
+        assertTrue((service.getBySeasonId(7L) as AppResult.Success).data.isEmpty())
+        assertNull((service.getById(7L) as AppResult.Success).data)
+        assertTrue(service.deleteById(7L) is AppResult.Error); assertTrue(service.deleteBySeasonId(7L) is AppResult.Error)
     }
 }

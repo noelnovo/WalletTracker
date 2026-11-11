@@ -5,14 +5,17 @@ def raw_request(url, method='GET', data=None, headers=None):
     u = urllib.parse.urlsplit(url)
     if u.scheme != 'https' or u.username or u.password:
         raise RuntimeError('Verified HTTPS required')
-    class Connection(http.client.HTTPSConnection):
-        def connect(self):
-            address = os.environ.get('VAULT_RESOLVE_ADDRESS', self.host) if self.host == 'vault.int.downops.win' else self.host
-            context = ssl.create_default_context()
-            context.check_hostname = True
-            context.verify_mode = ssl.CERT_REQUIRED
-            self.sock = context.wrap_socket(socket.create_connection((address, self.port or 443), timeout=30), server_hostname=self.host)
-    c = Connection(u.hostname, u.port or 443, context=ssl.create_default_context(), timeout=30)
+    context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+    context.check_hostname = True
+    context.verify_mode = ssl.CERT_REQUIRED
+    c = http.client.HTTPSConnection(u.hostname, u.port or 443, context=context, timeout=30)
+    address = os.environ.get('VAULT_RESOLVE_ADDRESS') if u.hostname == 'vault.int.downops.win' else None
+    if address:
+        # Override routing only. The stdlib still owns SNI, hostname checks,
+        # trusted CA verification and TLS negotiation; never wrap TLS ourselves.
+        def routed_socket(destination, timeout=30, source_address=None):
+            return socket.create_connection((address, destination[1]), timeout, source_address)
+        c._create_connection = routed_socket
     try:
         c.request(method, u.path + ('?' + u.query if u.query else ''), body=None if data is None else json.dumps(data).encode(),
                   headers={'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0 WalletTracker-Android-Delivery', **(headers or {})})
