@@ -79,8 +79,8 @@ def verify_backend():
 def verify_apk(apk, sdk, env, release_version):
     badging = command([str(sdk / 'aapt2'), 'dump', 'badging', str(apk)], env)
     line = next((line for line in badging.splitlines() if line.startswith('package: ')), '')
-    properties = (part.split('=', 1) for part in shlex.split(line.removeprefix('package: ')) if '=' in part)
-    fields = {key: value for key, value in properties}
+    fields = {part.partition('=')[0]: part.partition('=')[2]
+              for part in shlex.split(line.removeprefix('package: ')) if '=' in part}
     numbers = [int(value) for value in release_version.split('.')]
     code = str(numbers[0] * 10000 + numbers[1] * 100 + numbers[2])
     if (fields.get('name') != 'win.downops.wallettracker' or fields.get('versionCode') != code
