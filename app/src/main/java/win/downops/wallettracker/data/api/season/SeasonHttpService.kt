@@ -20,10 +20,15 @@ import win.downops.wallettracker.util.Messages.authenticationErrorMessage
 class SeasonHttpService @Inject constructor(
     sessionRepository: SessionRepository
 ) : BaseHttpService(sessionRepository), SeasonRepository {
+    private var service: SeasonEndpoints? = null
+    private val endpoint: SeasonEndpoints get() = service ?: ApiClient.season
+    internal constructor(sessionRepository: SessionRepository, endpoint: SeasonEndpoints) : this(sessionRepository) {
+        service = endpoint
+    }
 
     override suspend fun getAll(): AppResult<List<Season>> {
         return safeCipheredApiCall(
-            call = { token -> ApiClient.season.getAll("Bearer $token", getCipheredText()) },
+            call = { token -> endpoint.getAll("Bearer $token", getCipheredText()) },
             parser = { json ->
                 val parsed = GsonBuilder().create().fromJson<BaseResponse<List<Season>>>(json, object : TypeToken<BaseResponse<List<Season>>>() {}.type)
                 if (parsed.success) AppResult.Success(parsed.message, parsed.data ?: emptyList())
@@ -34,7 +39,7 @@ class SeasonHttpService @Inject constructor(
 
     override suspend fun getById(seasonId: Long): AppResult<Season?> {
         return safeCipheredApiCall(
-            call = { token -> ApiClient.season.getById("Bearer $token", getCipheredText(), encryptData(SeasonIdRequest(seasonId)) ?: throw Exception(authenticationErrorMessage)) },
+            call = { token -> endpoint.getById("Bearer $token", getCipheredText(), encryptData(SeasonIdRequest(seasonId)) ?: throw Exception(authenticationErrorMessage)) },
             parser = { json ->
                 val parsed = GsonBuilder().create().fromJson<BaseResponse<Season?>>(json, object : TypeToken<BaseResponse<Season?>>() {}.type)
                 if (parsed.success) AppResult.Success(parsed.message, parsed.data)
@@ -45,7 +50,7 @@ class SeasonHttpService @Inject constructor(
 
     override suspend fun getByYearMonth(year: Int, month: Int): AppResult<Season?> {
         return safeCipheredApiCall(
-            call = { token -> ApiClient.season.getOrCreate("Bearer $token", getCipheredText(), encryptData(GetOrCreateSeasonRequest(year, month)) ?: throw Exception(authenticationErrorMessage)) },
+            call = { token -> endpoint.getOrCreate("Bearer $token", getCipheredText(), encryptData(GetOrCreateSeasonRequest(year, month)) ?: throw Exception(authenticationErrorMessage)) },
             parser = { json ->
                 val parsed = GsonBuilder().create().fromJson<BaseResponse<Season?>>(json, object : TypeToken<BaseResponse<Season?>>() {}.type)
                 if (parsed.success) AppResult.Success(parsed.message, parsed.data)
@@ -60,7 +65,7 @@ class SeasonHttpService @Inject constructor(
 
     override suspend fun deleteById(seasonId: Long): AppResult<Unit> {
         return safeApiCall { token ->
-            ApiClient.season.deleteById("Bearer $token", getCipheredText(), encryptData(SeasonIdRequest(seasonId)) ?: throw Exception(authenticationErrorMessage))
+            endpoint.deleteById("Bearer $token", getCipheredText(), encryptData(SeasonIdRequest(seasonId)) ?: throw Exception(authenticationErrorMessage))
         }.let { result ->
             when (result) {
                 is AppResult.Success -> AppResult.Success(result.message, Unit)

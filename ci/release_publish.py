@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import subprocess
 import tempfile
 import urllib.error
@@ -78,7 +79,7 @@ def verify_backend():
 def verify_apk(apk, sdk, env, release_version):
     badging = command([str(sdk / 'aapt2'), 'dump', 'badging', str(apk)], env)
     line = next((line for line in badging.splitlines() if line.startswith('package: ')), '')
-    fields = dict(re.findall(r"(\w+)='([^']*)'", line))
+    fields = dict(part.split('=', 1) for part in shlex.split(line.removeprefix('package: ')) if '=' in part)
     numbers = [int(value) for value in release_version.split('.')]
     code = str(numbers[0] * 10000 + numbers[1] * 100 + numbers[2])
     if (fields.get('name') != 'win.downops.wallettracker' or fields.get('versionCode') != code
@@ -117,7 +118,7 @@ def sign(root, sdk, tag, vault):
     target = output / ('WalletTracker-' + tag + '.apk')
     with tempfile.TemporaryDirectory(prefix='wallet-signing-') as directory:
         key = Path(directory) / 'production.p12'
-        key.write_bytes(base64.b64decode(values['KEYSTORE_BASE64'], validate=True))
+        key.write_bytes(base64.b64decode(''.join(values['KEYSTORE_BASE64'].split()), validate=True))
         key.chmod(0o600)
         aligned = Path(directory) / 'aligned.apk'
         command([str(sdk / 'zipalign'), '-p', '-f', '4', str(unsigned), str(aligned)], env)

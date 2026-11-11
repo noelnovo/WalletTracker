@@ -19,14 +19,14 @@ import kotlin.Long
 import kotlin.arrayOf
 
 
-class SessionSqlService @Inject constructor(@ApplicationContext context: Context?) : Closeable, SessionRepository {
-    private var database: SQLiteDatabase? = null
-    private var dbHelper: DatabaseHelper? = null
-
-    init {
-        dbHelper = DatabaseHelper(context)
+class SessionSqlService private constructor(
+    private var database: SQLiteDatabase?,
+    private var dbHelper: DatabaseHelper?
+) : Closeable, SessionRepository {
+    @Inject constructor(@ApplicationContext context: Context?) : this(null, DatabaseHelper(context)) {
         database = dbHelper?.writableDatabase
     }
+    internal constructor(database: SQLiteDatabase?) : this(database, null)
     override fun close() {
         dbHelper?.close()
     }

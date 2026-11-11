@@ -204,7 +204,7 @@ class CreateExpenseFragment : Fragment() {
         binding.pickDate.setOnClickListener {
             showDatePickerDialog()
         }
-        binding.inputPrice.setOnEditorActionListener { _, actionId, event ->
+        binding.inputPrice.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_NEXT ||
                 (actionId == EditorInfo.IME_ACTION_DONE)) {
                 createOrEditChanges()

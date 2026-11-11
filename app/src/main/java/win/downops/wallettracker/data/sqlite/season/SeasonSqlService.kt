@@ -18,16 +18,12 @@ import java.sql.SQLException
 
 private const val DATABASE_NOT_AVAILABLE = "Database not available"
 
-class SeasonSqlService @Inject constructor(
-    @ApplicationContext context: Context?
+class SeasonSqlService private constructor(
+    private var database: SQLiteDatabase?,
+    private var dbHelper: DatabaseHelper?
 ) : Closeable, SeasonRepository {
-
-    private var database: SQLiteDatabase? = null
-    private var dbHelper: DatabaseHelper? = DatabaseHelper(context)
-
-    init {
-        database = dbHelper?.writableDatabase
-    }
+    @Inject constructor(@ApplicationContext context: Context?) : this(null, DatabaseHelper(context)) { open() }
+    internal constructor(database: SQLiteDatabase?) : this(database, null)
 
     @Throws(SQLException::class)
     fun open() {

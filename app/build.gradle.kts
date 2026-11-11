@@ -33,7 +33,7 @@ android {
         viewBinding = true
     }
     testOptions {
-        unitTests.all { it.maxHeapSize = "128m" }
+        unitTests.all { it.maxHeapSize = "256m" }
     }
 
     val devKeyFile = System.getenv("DEV_KEYSTORE_FILE")
@@ -95,6 +95,8 @@ dependencies {
     implementation(libs.androidx.fragment.ktx)
     implementation(libs.androidx.activity)
     testImplementation(libs.junit)
+    testImplementation("org.mockito:mockito-core:5.24.0")
+    testImplementation("org.bouncycastle:bcprov-jdk18on:1.86")
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
 

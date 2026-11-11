@@ -116,23 +116,35 @@ class WalletModel(application: Application) : AndroidViewModel(application) {
         val local = store ?: return@withLock
         if (!unlocked) return@withLock
         if (account == "local" || refresh == null) return@withLock
+        syncAccount(local)
+    }
+
+    private suspend fun syncAccount(local: FinanceStore) {
         try {
             status.value = "Syncing…"
             if (access == null || System.currentTimeMillis() >= expiry) {
                 acceptTokens(api.call("refresh", JSONObject().put("refresh_token", refresh)))
             }
-            if (!unlocked) return@withLock
+            if (!unlocked) return
             transfer(local)
-            if (!unlocked) return@withLock
-            status.value = summarize(local)
-            if (!unlocked) return@withLock
-            changes.value++
+            updateSyncStatus(local)
         } catch (error: IOException) {
-            if (!unlocked) return@withLock
-            if (error is ItemizedBillSyncUnavailable) withContext(Dispatchers.IO) { local.retainIncompatibleBill(error) }
-            status.value = failureLabel(error)
-            changes.value++
+            recordSyncFailure(local, error)
         }
+    }
+
+    private suspend fun updateSyncStatus(local: FinanceStore) {
+        if (!unlocked) return
+        status.value = summarize(local)
+        if (!unlocked) return
+        changes.value++
+    }
+
+    private suspend fun recordSyncFailure(local: FinanceStore, error: IOException) {
+        if (!unlocked) return
+        if (error is ItemizedBillSyncUnavailable) withContext(Dispatchers.IO) { local.retainIncompatibleBill(error) }
+        status.value = failureLabel(error)
+        changes.value++
     }
 
     /** Push outbox operations, then pull pages, then refresh configuration. */
@@ -161,8 +173,12 @@ class WalletModel(application: Application) : AndroidViewModel(application) {
 
     private suspend fun summarize(local: FinanceStore): String = withContext(Dispatchers.IO) {
         val conflicts = local.rows(true).count { it.optBoolean("has_conflict") }
-        if (local.blockedItemizedBills() > 0) "Itemized bills need a server update; saved on this phone"
-        else if (conflicts > 0) "Review ($conflicts)" else if (local.pendingCount() > 0) "Pending" else "Synced"
+        when {
+            local.blockedItemizedBills() > 0 -> "Itemized bills need a server update; saved on this phone"
+            conflicts > 0 -> "Review ($conflicts)"
+            local.pendingCount() > 0 -> "Pending"
+            else -> "Synced"
+        }
     }
 
     private fun failureLabel(error: IOException): String = when (error) {

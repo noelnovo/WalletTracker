@@ -6,6 +6,14 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class GitlabDeliveryTests(unittest.TestCase):
+    def test_legacy_password_cipher_is_retired_without_removing_wallet_migration(self):
+        activity = (ROOT / 'app/src/main/java/win/downops/wallettracker/v2/WalletActivity.kt').read_text()
+        self.assertNotIn('AES/CBC', activity)
+        self.assertNotIn('unlockLegacy(', activity)
+        self.assertIn('DeviceVault(this, id).unlockCipher()', activity)
+        self.assertIn('model.legacySnapshot()', activity)
+        self.assertIn('model.migrateLegacy(', activity)
+
     def test_scan_uses_the_canonical_generic_adapter(self):
         workflow = (ROOT / '.gitlab-ci.yml').read_text()
         self.assertIn('project: downops/github-workflows', workflow)
@@ -18,9 +26,9 @@ class GitlabDeliveryTests(unittest.TestCase):
     def test_builds_are_bounded_and_signer_does_not_execute_candidate_code(self):
         workflow = (ROOT / '.gitlab-ci.yml').read_text()
         self.assertIn('--max-workers=1', workflow)
-        self.assertIn('-Xmx512m', workflow)
+        self.assertIn('-Xmx1024m', workflow)
         self.assertIn('-XX:MaxMetaspaceSize=384m', workflow)
-        self.assertIn('-XX:ReservedCodeCacheSize=96m', workflow)
+        self.assertIn('-XX:ReservedCodeCacheSize=128m', workflow)
         release = workflow.split('\nrelease:\n')[1]
         self.assertIn('job: security', release)
         self.assertIn('cache: []', release)

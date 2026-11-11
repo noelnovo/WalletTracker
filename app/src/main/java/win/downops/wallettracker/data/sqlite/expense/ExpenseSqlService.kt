@@ -26,16 +26,12 @@ private const val DATABASE_NOT_AVAILABLE = "Database not available"
 private const val ID_EQUALS = "id = ?"
 
 @RequiresApi(Build.VERSION_CODES.O)
-class ExpenseSqlService @Inject constructor(
-    @ApplicationContext context: Context?
+class ExpenseSqlService private constructor(
+    private var database: SQLiteDatabase?,
+    private var dbHelper: DatabaseHelper?
 ) : Closeable, ExpenseRepository {
-
-    private var database: SQLiteDatabase? = null
-    private var dbHelper: DatabaseHelper? = DatabaseHelper(context)
-
-    init {
-        database = dbHelper?.writableDatabase
-    }
+    @Inject constructor(@ApplicationContext context: Context?) : this(null, DatabaseHelper(context)) { open() }
+    internal constructor(database: SQLiteDatabase?) : this(database, null)
 
     @Throws(SQLException::class)
     fun open() {

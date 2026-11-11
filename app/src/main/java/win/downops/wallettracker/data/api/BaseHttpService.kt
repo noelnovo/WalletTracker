@@ -6,6 +6,7 @@ import win.downops.wallettracker.data.api.communication.responses.BaseResponse
 import win.downops.wallettracker.data.api.communication.responses.CipheredResponse
 import com.google.gson.GsonBuilder
 import retrofit2.Response
+import win.downops.wallettracker.data.api.communication.responses.LoginResponse
 import win.downops.wallettracker.data.SessionRepository
 import win.downops.wallettracker.data.api.communication.requests.CipheredRequest
 import win.downops.wallettracker.data.models.AppResult
@@ -89,7 +90,7 @@ abstract class BaseHttpService(
     }
 
     private suspend fun attemptTokenRefresh(): AppResult<String> {
-        val refreshResponse = ApiClient.login.refresh("Bearer ${getToken()}")
+        val refreshResponse = refreshCredentials(getToken())
         if (refreshResponse.isSuccessful && refreshResponse.body()?.success == true) {
             val newToken = refreshResponse.body()?.data?.token
             if (newToken != null) {
@@ -101,4 +102,7 @@ abstract class BaseHttpService(
         }
         return AppResult.Error("Refresh failed", code = refreshResponse.code())
     }
+
+    protected open suspend fun refreshCredentials(token: String): Response<BaseResponse<LoginResponse>> =
+        ApiClient.login.refresh("Bearer $token")
 }

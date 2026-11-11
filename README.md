@@ -17,6 +17,11 @@ Local records use Android Keystore-backed encryption. API v2 uses HTTPS and
 short-lived access tokens with rotated refresh tokens—not the retired v1 hybrid
 encryption protocol. Screens remain protected against screenshots and recording.
 
+Older v1 installations must sign in once by password instead of decrypting a
+legacy AES-CBC biometric password. Current v2 fingerprint login is unchanged.
+Existing wallet records and the explicit legacy financial-data migration remain
+available; do not uninstall or clear application data.
+
 ## Project layout
 
 | Directory | Purpose |
@@ -33,6 +38,11 @@ encryption protocol. Screens remain protected against screenshots and recording.
 
 Python scripts are small CI helpers; Gradle still builds and tests the Android
 application. Run Python entry points from the repository root with `python3 -m`.
+JVM repository-contract tests execute the real adapters against mocked Android
+SQLite/HTTP boundaries, including missing rows, failed writes, token refresh and
+synthetic encrypted envelopes. They are unit tests, not on-device persistence
+or production-network proofs. Mockito/Bouncy Castle are test-only dependencies;
+the complete Gradle SBOM still includes them for security evaluation.
 
 ## Development
 

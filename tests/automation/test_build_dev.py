@@ -69,7 +69,7 @@ class DevSigningTests(unittest.TestCase):
 
     def test_policy_plan_matches_exact_dev_record(self):
         plan = json.loads((build_dev.ROOT / 'config/signing/dev-signing-vault-plan.json').read_text())
-        self.assertEqual(build_dev.DEV_SIGNING_PATH, f"{plan['kv_mount']}/data/{plan['kv_v2_path']}")
+        self.assertEqual(f"{plan['kv_mount']}/data/{plan['kv_v2_path']}", build_dev.DEV_SIGNING_PATH)
         self.assertEqual('path "downops/data/apps/wallettracker/dev/mobile" { capabilities = ["read"] }', plan['policy'])
         self.assertNotIn('KEY_PASSWORD', plan['required_keys'])
 

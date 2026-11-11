@@ -26,10 +26,15 @@ class ExpenseHttpService @Inject constructor(
     sessionRepository: SessionRepository
 ) : BaseHttpService(sessionRepository),
     ExpenseRepository{
+    private var service: ExpenseEndpoints? = null
+    private val endpoint: ExpenseEndpoints get() = service ?: ApiClient.expense
+    internal constructor(sessionRepository: SessionRepository, endpoint: ExpenseEndpoints) : this(sessionRepository) {
+        service = endpoint
+    }
 
     override suspend fun getById(expenseId: Long): AppResult<Expense?> {
         return safeCipheredApiCall(
-            call = { ApiClient.expense.getById("Bearer ${getToken()}", getCipheredText(), encryptData(ExpenseIdRequest(expenseId)) ?: throw Exception(authenticationErrorMessage)) },
+            call = { endpoint.getById("Bearer ${getToken()}", getCipheredText(), encryptData(ExpenseIdRequest(expenseId)) ?: throw Exception(authenticationErrorMessage)) },
             parser = { json ->
                 val parsed = GsonBuilder().setDateFormat(DATE_FORMAT).create()
                     .fromJson(json, object : com.google.gson.reflect.TypeToken<BaseResponse<Expense?>>() {}.type) as BaseResponse<Expense?>
@@ -41,7 +46,7 @@ class ExpenseHttpService @Inject constructor(
 
     override suspend fun getBySeasonId(seasonId: Long): AppResult<List<Expense>> {
         return safeCipheredApiCall(
-            call = { ApiClient.expense.getBySeasonId("Bearer ${getToken()}", getCipheredText(), encryptData(ExpenseBySeasonIdRequest(seasonId)) ?: throw Exception(authenticationErrorMessage)) },
+            call = { endpoint.getBySeasonId("Bearer ${getToken()}", getCipheredText(), encryptData(ExpenseBySeasonIdRequest(seasonId)) ?: throw Exception(authenticationErrorMessage)) },
             parser = { json ->
                 val parsed = GsonBuilder().setDateFormat(DATE_FORMAT).create()
                     .fromJson(json, object : com.google.gson.reflect.TypeToken<BaseResponse<List<Expense>>>() {}.type) as BaseResponse<List<Expense>>
@@ -53,7 +58,7 @@ class ExpenseHttpService @Inject constructor(
 
     override suspend fun getByCatId(catId: Long): AppResult<List<Expense>> {
         return safeCipheredApiCall(
-            call = { ApiClient.expense.getByCatId("Bearer ${getToken()}", getCipheredText(), encryptData(ExpenseByCategoryIdRequest(catId)) ?: throw Exception(authenticationErrorMessage)) },
+            call = { endpoint.getByCatId("Bearer ${getToken()}", getCipheredText(), encryptData(ExpenseByCategoryIdRequest(catId)) ?: throw Exception(authenticationErrorMessage)) },
             parser = { json ->
                 val parsed = GsonBuilder().setDateFormat(DATE_FORMAT).create()
                     .fromJson(json, object : com.google.gson.reflect.TypeToken<BaseResponse<List<Expense>>>() {}.type) as BaseResponse<List<Expense>>
@@ -65,7 +70,7 @@ class ExpenseHttpService @Inject constructor(
 
     override suspend fun create(expense: Expense): AppResult<Expense?> {
         return safeCipheredApiCall(
-            call = { ApiClient.expense.create("Bearer ${getToken()}", getCipheredText(), encryptData(CreateExpenseRequest(expense.getPrice(), expense.getDateString(), expense.getCategoryId(), expense.description)) ?: throw Exception(authenticationErrorMessage)) },
+            call = { endpoint.create("Bearer ${getToken()}", getCipheredText(), encryptData(CreateExpenseRequest(expense.getPrice(), expense.getDateString(), expense.getCategoryId(), expense.description)) ?: throw Exception(authenticationErrorMessage)) },
             parser = { json ->
                 val parsed = GsonBuilder().setDateFormat(DATE_FORMAT).create()
                     .fromJson(json, object : com.google.gson.reflect.TypeToken<BaseResponse<Expense?>>() {}.type) as BaseResponse<Expense?>
@@ -77,7 +82,7 @@ class ExpenseHttpService @Inject constructor(
 
     override suspend fun edit(expense: Expense): AppResult<Expense?> {
         return safeCipheredApiCall(
-            call = { ApiClient.expense.edit("Bearer ${getToken()}", getCipheredText(), encryptData(EditExpenseRequest(expense.id, expense.getPrice(), expense.getDateString(), expense.getCategoryId(), expense.description)) ?: throw Exception(authenticationErrorMessage)) },
+            call = { endpoint.edit("Bearer ${getToken()}", getCipheredText(), encryptData(EditExpenseRequest(expense.id, expense.getPrice(), expense.getDateString(), expense.getCategoryId(), expense.description)) ?: throw Exception(authenticationErrorMessage)) },
             parser = { json ->
                 val parsed = GsonBuilder().setDateFormat(DATE_FORMAT).create()
                     .fromJson(json, object : com.google.gson.reflect.TypeToken<BaseResponse<Expense?>>() {}.type) as BaseResponse<Expense?>
@@ -88,7 +93,7 @@ class ExpenseHttpService @Inject constructor(
     }
 
     override suspend fun deleteById(expenseId: Long): AppResult<Unit> {
-        val response = ApiClient.expense.deleteById("Bearer ${getToken()}", getCipheredText(), encryptData(ExpenseIdRequest(expenseId)) ?: throw Exception(authenticationErrorMessage))
+        val response = endpoint.deleteById("Bearer ${getToken()}", getCipheredText(), encryptData(ExpenseIdRequest(expenseId)) ?: throw Exception(authenticationErrorMessage))
         if (response.code() == 401) {
             val refresh = ApiClient.login.refresh("Bearer ${getToken()}")
             if (refresh.isSuccessful && refresh.body()?.success == true) {
@@ -97,7 +102,7 @@ class ExpenseHttpService @Inject constructor(
                     val currentSession = session
                     currentSession.token = newToken
                     sessionRepository.edit(currentSession)
-                    val retryResponse = ApiClient.expense.deleteById("Bearer ${newToken}", getCipheredText(), encryptData(ExpenseIdRequest(expenseId)) ?: throw Exception(authenticationErrorMessage))
+                    val retryResponse = endpoint.deleteById("Bearer ${newToken}", getCipheredText(), encryptData(ExpenseIdRequest(expenseId)) ?: throw Exception(authenticationErrorMessage))
                     val body = retryResponse.body() ?: return AppResult.Error(NO_DATA, code = retryResponse.code())
                     return if (body.success) AppResult.Success(body.message, Unit) else AppResult.Error(body.message, code = retryResponse.code())
                 }
@@ -108,7 +113,7 @@ class ExpenseHttpService @Inject constructor(
     }
 
     override suspend fun deleteAll(): AppResult<Unit> {
-        val response = ApiClient.expense.deleteAll("Bearer ${getToken()}", getCipheredText())
+        val response = endpoint.deleteAll("Bearer ${getToken()}", getCipheredText())
         if (response.code() == 401) {
              val refresh = ApiClient.login.refresh("Bearer ${getToken()}")
              if (refresh.isSuccessful && refresh.body()?.success == true) {
@@ -117,7 +122,7 @@ class ExpenseHttpService @Inject constructor(
                      val currentSession = session
                      currentSession.token = newToken
                      sessionRepository.edit(currentSession)
-                     val retryResponse = ApiClient.expense.deleteAll("Bearer ${newToken}", getCipheredText())
+                    val retryResponse = endpoint.deleteAll("Bearer ${newToken}", getCipheredText())
                      val body = retryResponse.body() ?: return AppResult.Error(NO_DATA, code = retryResponse.code())
                      return if (body.success) AppResult.Success(body.message, Unit) else AppResult.Error(body.message, code = retryResponse.code())
                  }

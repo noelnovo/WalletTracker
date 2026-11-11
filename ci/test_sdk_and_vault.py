@@ -117,11 +117,13 @@ class VaultTests(unittest.TestCase):
             def close(self):self.closed=True
         for url in ['http://example.invalid','https://user:password@example.invalid']:
             with self.assertRaises(RuntimeError):access.raw_request(url)
-        with patch.object(access.http.client,'HTTPSConnection',Connection), \
+        with patch.dict(os.environ,{'VAULT_RESOLVE_ADDRESS':'gateway.invalid'}),patch.object(access.http.client,'HTTPSConnection',Connection), \
              patch.object(access.ssl,'create_default_context') as context,patch.object(access.socket,'create_connection') as connect:
             self.assertEqual(access.request('https://vault.int.downops.win/path?mode=test','POST',{'data':'synthetic'}),{'ok':True})
             instances[-1].connect()
-            self.assertEqual(connect.call_args.args[0],('10.2.0.10',443))
+            self.assertEqual(connect.call_args.args[0],('gateway.invalid',443))
+            self.assertTrue(context.return_value.check_hostname)
+            self.assertEqual(context.return_value.verify_mode,access.ssl.CERT_REQUIRED)
             self.assertTrue(instances[-1].closed)
             access.raw_request('https://example.invalid/path')
             instances[-1].connect()

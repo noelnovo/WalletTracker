@@ -7,8 +7,11 @@ def raw_request(url, method='GET', data=None, headers=None):
         raise RuntimeError('Verified HTTPS required')
     class Connection(http.client.HTTPSConnection):
         def connect(self):
-            address = '10.2.0.10' if self.host == 'vault.int.downops.win' else self.host
-            self.sock = self._context.wrap_socket(socket.create_connection((address, self.port or 443), timeout=30), server_hostname=self.host)
+            address = os.environ.get('VAULT_RESOLVE_ADDRESS', self.host) if self.host == 'vault.int.downops.win' else self.host
+            context = ssl.create_default_context()
+            context.check_hostname = True
+            context.verify_mode = ssl.CERT_REQUIRED
+            self.sock = context.wrap_socket(socket.create_connection((address, self.port or 443), timeout=30), server_hostname=self.host)
     c = Connection(u.hostname, u.port or 443, context=ssl.create_default_context(), timeout=30)
     try:
         c.request(method, u.path + ('?' + u.query if u.query else ''), body=None if data is None else json.dumps(data).encode(),

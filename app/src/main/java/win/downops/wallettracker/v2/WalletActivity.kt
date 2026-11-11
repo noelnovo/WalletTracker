@@ -63,10 +63,6 @@ import java.text.DateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
-import java.security.KeyStore
-import javax.crypto.SecretKey
-import javax.crypto.spec.IvParameterSpec
-import javax.crypto.Cipher
 
 /** Material 3 shell. Data, transport, crypto and sync are deliberately outside the view. */
 class WalletActivity : AppCompatActivity() {
@@ -342,6 +338,20 @@ class WalletActivity : AppCompatActivity() {
 
     private fun render(refreshData: Boolean = false) {
         if (!model.unlocked) {
+            resetLockedShell()
+            return
+        }
+        showingLogin = false
+        automaticUnlockEligible = false
+        val store = model.store!!
+        if (shellStore !== store || navigation == null) buildShell(store)
+        updateStatus()
+        if (renderedScreen != screen) showScreen()
+        val revision = model.changes.value
+        if (refreshData || requestedRevision != revision) requestWalletData(store, revision)
+    }
+
+    private fun resetLockedShell() {
             migrationCheckedForAccount = null
             legacyDataAvailable = false
             activeSnackbar?.dismiss(); activeSnackbar = null
@@ -352,36 +362,16 @@ class WalletActivity : AppCompatActivity() {
             afterDataLoad.clear()
             listPositions.clear(); settingsScrollY = 0
             if (!showingLogin) login()
-            return
-        }
-        showingLogin = false
-        automaticUnlockEligible = false
-        val store = model.store!!
-        if (shellStore !== store || navigation == null) buildShell(store)
-        updateStatus()
-        if (renderedScreen != screen) showScreen()
-        val revision = model.changes.value
-        if (refreshData || requestedRevision != revision) {
+    }
+
+    private fun requestWalletData(store: FinanceStore, revision: Int) {
             requestedRevision = revision
             dataLoad?.cancel()
             val previousRows = allRows
             val previousPending = pendingChanges
             val firstLoad = loadedRevision < 0
             dataLoad = lifecycleScope.launch {
-                val snapshot = try {
-                    withContext(Dispatchers.IO) {
-                        val rows = store.rows(true)
-                        val pending = store.pendingCount()
-                        Triple(rows, pending, firstLoad || previousPending != pending ||
-                            previousRows.map(JSONObject::toString) != rows.map(JSONObject::toString))
-                    }
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (_: Exception) {
-                    requestedRevision = -1
-                    if (model.unlocked && model.store === store) message("Unable to load your wallet. Your data is retained.")
-                    return@launch
-                }
+                val snapshot = readWalletSnapshot(store, firstLoad, previousPending, previousRows) ?: return@launch
                 if (!model.unlocked || model.store !== store || shellStore !== store) return@launch
                 val changed = snapshot.third
                 loadedRevision = revision; allRows = snapshot.first; pendingChanges = snapshot.second
@@ -394,6 +384,23 @@ class WalletActivity : AppCompatActivity() {
                 callbacks.forEach { it() }
                 offerLegacyMigration()
             }
+    }
+
+    private suspend fun readWalletSnapshot(store: FinanceStore, firstLoad: Boolean, previousPending: Int,
+                                         previousRows: List<JSONObject>): Triple<List<JSONObject>, Int, Boolean>? {
+        return try {
+            withContext(Dispatchers.IO) {
+                val rows = store.rows(true)
+                val pending = store.pendingCount()
+                Triple(rows, pending, firstLoad || previousPending != pending ||
+                    previousRows.map(JSONObject::toString) != rows.map(JSONObject::toString))
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            requestedRevision = -1
+            if (model.unlocked && model.store === store) message("Unable to load your wallet. Your data is retained.")
+            null
         }
     }
 
@@ -503,7 +510,7 @@ class WalletActivity : AppCompatActivity() {
         val (page, body) = loginShell()
         val legacyCredentials = model.legacyCredentials()
         val biometricAvailable = BiometricManager.from(this).canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG) == BiometricManager.BIOMETRIC_SUCCESS
-        if (!createAccount && !usePassword && biometricAvailable && (model.wrappedRefresh != null || legacyCredentials != null)) {
+        if (!createAccount && !usePassword && biometricAvailable && model.wrappedRefresh != null) {
             welcomeBack(body, page, legacyCredentials?.username.orEmpty())
             return
         }
@@ -536,8 +543,7 @@ class WalletActivity : AppCompatActivity() {
         body.addView(text(model.savedName.ifEmpty { savedUsername }, 16f, muted))
         body.addView(text("Unlock to view your wallet.", 14f, muted).apply { setPadding(0, dp(8), 0, dp(20)) })
         body.addView(button("Unlock wallet") {
-            val legacy = model.legacyCredentials()
-            if (model.wrappedRefresh != null) unlock() else legacy?.let { unlockLegacy(it) }
+            unlock()
         }.apply { setIconResource(R.drawable.ic_fingerprint) }, LinearLayout.LayoutParams(-1, -2))
         page.addView(textButton(USE_PASSWORD) { login(usePassword = true) }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
         root.post { promptAutomatically() }
@@ -561,9 +567,7 @@ class WalletActivity : AppCompatActivity() {
         body.addView(remember)
         lateinit var signIn: MaterialButton
         signIn = button(if (createAccount) "Create account" else "Sign in") {
-            if (username.text.isNullOrBlank() || password.text.isNullOrEmpty()) { message("Enter your username and password"); return@button }
-            if (createAccount && username.text.toString().trim().length !in 3..128) { username.error = "3–128 characters"; return@button }
-            if (createAccount && password.text.toString().length !in 12..1024) { password.error = "12–1024 characters"; return@button }
+            if (!validCredentials(username, password, createAccount)) return@button
             signIn.isEnabled = false
             authenticationJob = task {
                 try {
@@ -577,7 +581,7 @@ class WalletActivity : AppCompatActivity() {
         body.addView(signIn, LinearLayout.LayoutParams(-1, -2))
         password.imeOptions = EditorInfo.IME_ACTION_DONE
         password.setOnEditorActionListener { _, action, _ ->
-            if (action == EditorInfo.IME_ACTION_DONE) { if (signIn.isEnabled) signIn.performClick(); true } else false
+            submitCredentialsOnDone(signIn, action)
         }
         // Registration is a separate form; the backend still authorizes it.
         page.addView(textButton(if (createAccount) "Already have an account? Sign in" else "Create an account") {
@@ -590,12 +594,31 @@ class WalletActivity : AppCompatActivity() {
         }.apply { setTextColor(muted) }, LinearLayout.LayoutParams(-1, -2))
     }
 
+    private fun validCredentials(username: TextInputEditText, password: TextInputEditText, createAccount: Boolean): Boolean {
+        if (username.text.isNullOrBlank() || password.text.isNullOrEmpty()) {
+            message("Enter your username and password"); return false
+        }
+        if (createAccount && username.text.toString().trim().length !in 3..128) {
+            username.error = "3–128 characters"; return false
+        }
+        if (createAccount && password.text.toString().length !in 12..1024) {
+            password.error = "12–1024 characters"; return false
+        }
+        return true
+    }
+
+    private fun submitCredentialsOnDone(signIn: MaterialButton, action: Int): Boolean {
+        if (action != EditorInfo.IME_ACTION_DONE) return false
+        if (signIn.isEnabled) signIn.performClick()
+        return true
+    }
+
     private fun promptAutomatically() {
         if (!::unlockGate.isInitialized || isFinishing || isDestroyed) return
         val eligible = showingLogin && automaticUnlockEligible && !model.unlocked
         if (!unlockGate.automatic(eligible, lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))) return
         if (model.wrappedRefresh != null) unlock(automatic = true)
-        else model.legacyCredentials()?.let { unlockLegacy(it, automatic = true) } ?: unlockGate.finished()
+        else unlockGate.finished()
     }
 
     private fun unlock(automatic: Boolean = false) {
@@ -628,46 +651,6 @@ class WalletActivity : AppCompatActivity() {
                 .setNegativeButtonText(USE_PASSWORD).build()
             biometricPrompt = prompt
             prompt.authenticate(info, BiometricPrompt.CryptoObject(cipher))
-        } catch (_: Exception) { unlockGate.finished(); login(usePassword = true); message("Fingerprint unavailable. Sign in again.") }
-    }
-
-    private fun unlockLegacy(credentials: LegacyUpgrade.Credentials, automatic: Boolean = false) {
-        if (!automatic && !unlockGate.manual()) return
-        val attempt = ++biometricAttempt
-        try {
-            val key = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.getKey("USER_KEY", null) as SecretKey
-            // PKCS7 is the v1 wrapping format; changing it would strand pre-migration
-            // credentials. Decryption-only, one-shot, over biometric-gated key access.
-            @Suppress("S5542")
-            val cipher = Cipher.getInstance("AES/CBC/PKCS7Padding").apply {
-                init(Cipher.DECRYPT_MODE, key, IvParameterSpec(android.util.Base64.decode(credentials.iv, android.util.Base64.NO_WRAP)))
-            }
-            val prompt = BiometricPrompt(this, ContextCompat.getMainExecutor(this), object : BiometricPrompt.AuthenticationCallback() {
-                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                    if (attempt != biometricAttempt) return
-                    unlockGate.finished()
-                    if (!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return
-                    authenticationJob = task {
-                        val bytes = requireNotNull(result.cryptoObject?.cipher).doFinal(android.util.Base64.decode(credentials.ciphertext, android.util.Base64.NO_WRAP))
-                        try {
-                            val parts = bytes.toString(Charsets.UTF_8).split(';', limit = 2)
-                            check(parts.size == 2 && (credentials.username.isEmpty() || parts[0] == credentials.username)) { "Sign in again" }
-                            model.login(parts[0], parts[1], true)
-                            render()
-                        } finally { bytes.fill(0) }
-                    }
-                }
-                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-                    if (attempt != biometricAttempt) return
-                    unlockGate.finished()
-                    if (!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return
-                    if (errorCode == BiometricPrompt.ERROR_NEGATIVE_BUTTON) login(usePassword = true) else message(errString.toString())
-                }
-            })
-            biometricPrompt = prompt
-            prompt.authenticate(BiometricPrompt.PromptInfo.Builder().setTitle("Unlock your wallet")
-                .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
-                .setNegativeButtonText(USE_PASSWORD).build(), BiometricPrompt.CryptoObject(cipher))
         } catch (_: Exception) { unlockGate.finished(); login(usePassword = true); message("Fingerprint unavailable. Sign in again.") }
     }
 
@@ -778,7 +761,8 @@ class WalletActivity : AppCompatActivity() {
         }).attachToRecyclerView(list)
         if (rows.isEmpty()) {
             val empty = design.column().apply { gravity = Gravity.CENTER; setPadding(dp(20), dp(24), dp(20), dp(24)) }
-            empty.addView(design.badge(if (kind == "bill") R.drawable.wallet_ic_people else if (kind == "debt") R.drawable.wallet_ic_people else R.drawable.wallet_ic_expense, 60))
+            val icon = when (kind) { "bill", "debt" -> R.drawable.wallet_ic_people; else -> R.drawable.wallet_ic_expense }
+            empty.addView(design.badge(icon, 60))
             empty.addView(design.text(when (kind) { "bill" -> "No bills yet"; "debt" -> "No debts yet"; else -> "No expenses yet" }, 21f, ink, true).apply {
                 gravity = Gravity.CENTER; setPadding(0, dp(16), 0, dp(4))
             })
@@ -845,15 +829,8 @@ class WalletActivity : AppCompatActivity() {
                 line.addView(design.badge(if (row.getString("kind") == "bill") R.drawable.wallet_ic_people else R.drawable.wallet_ic_expense))
             }
             // Grouping already names the person; debt rows describe what the debt is for.
-            val title = when (row.getString("kind")) {
-                "debt" -> payload.optString("description").ifEmpty { payload.optString("person") }
-                else -> payload.optString("description")
-            }
-            val detail = when (row.getString("kind")) {
-                "bill" -> "${payload.optJSONArray("participants")?.length() ?: 0} people · paid by ${payload.optString("paid_by")}"
-                "debt" -> displayDay(payload.optString("date"))
-                else -> categoryName(payload.optString("category_id"))
-            }
+            val title = recordTitle(row.getString("kind"), payload)
+            val detail = recordDetail(row.getString("kind"), payload)
             val settled = row.getString("kind") == "debt" && payload.optBoolean("paid")
             val titleColor = if (settled) muted else ink
             val labels = design.column()
@@ -896,6 +873,17 @@ class WalletActivity : AppCompatActivity() {
             val state = if (row.getString("kind") == "debt") if (settled) " Paid" else " Unpaid" else ""
             return "$title, $detail, $amount.$state"
         }
+    }
+
+    private fun recordTitle(kind: String, payload: JSONObject): String = when (kind) {
+        "debt" -> payload.optString("description").ifEmpty { payload.optString("person") }
+        else -> payload.optString("description")
+    }
+
+    private fun recordDetail(kind: String, payload: JSONObject): String = when (kind) {
+        "bill" -> "${payload.optJSONArray("participants")?.length() ?: 0} people · paid by ${payload.optString("paid_by")}"
+        "debt" -> displayDay(payload.optString("date"))
+        else -> categoryName(payload.optString("category_id"))
     }
 
     private fun categoryRows() = visibleRows.filter { it.getString("kind") == "category" }
@@ -1013,13 +1001,19 @@ class WalletActivity : AppCompatActivity() {
                 payload.put("category_id", requireNotNull(selectedCategory).getString("id"))
                 model.store!!.save(kind, payload, row); model.changed(); render(); dialog.dismiss()
             } catch (error: Exception) {
-                formError.text = error.message ?: "Check the form"
-                if (runCatching { BillSplitter.amount(amount.text.toString()) }.isFailure) amount.error = formError.text
-                if (description.text.toString().trim().isEmpty() || description.text.toString().trim().length > 255) description.error = "Enter a description up to 255 characters"
-                formError.requestRectangleOnScreen(android.graphics.Rect(0, 0, formError.width, formError.height), true)
+                reportExpenseFormError(formError, amount, description, error)
             }
         }
         showDialog(dialog)
+    }
+
+    private fun reportExpenseFormError(formError: TextView, amount: TextInputEditText,
+                                       description: TextInputEditText, error: Exception) {
+        formError.text = error.message ?: "Check the form"
+        if (runCatching { BillSplitter.amount(amount.text.toString()) }.isFailure) amount.error = formError.text
+        val note = description.text.toString().trim()
+        if (note.isEmpty() || note.length > 255) description.error = "Enter a description up to 255 characters"
+        formError.requestRectangleOnScreen(android.graphics.Rect(0, 0, formError.width, formError.height), true)
     }
 
     private fun billEditor(row: JSONObject? = null) {
