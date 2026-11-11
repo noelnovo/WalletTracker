@@ -17,7 +17,7 @@ class GitlabDeliveryTests(unittest.TestCase):
         workflow = (ROOT / '.gitlab-ci.yml').read_text()
         self.assertIn('--max-workers=1', workflow)
         self.assertIn('-Xmx512m', workflow)
-        self.assertIn('-XX:MaxMetaspaceSize=256m', workflow)
+        self.assertIn('-XX:MaxMetaspaceSize=384m', workflow)
         self.assertIn('-XX:ReservedCodeCacheSize=96m', workflow)
         release = workflow.split('\nrelease:\n')[1]
         self.assertIn('job: security', release)
