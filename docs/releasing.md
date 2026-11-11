@@ -11,7 +11,8 @@ backups. The GitLab project's `ci_config_path` pins a reviewed immutable copy of
    versionCode must increase; this development line retains `-alpha` in versionName.
 2. The credential-free jobs run source/automation/JVM tests, genuine JaCoCo
    reporting and debug/unsigned release builds. Gradle is serialized per project,
-   uses one worker and a 768 MiB heap; do not resize/restart the shared runner as
+   uses one worker, a 512 MiB heap, 256 MiB metaspace, 96 MiB code cache and
+   64 MiB direct-memory limit; do not resize/restart the shared runner as
    an ordinary build step.
 3. The shared immutable GitLab adapter checks current source/target ancestry,
    same-pipeline artifact identities and digests, then runs the real DT/Sonar gate.

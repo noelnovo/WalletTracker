@@ -50,7 +50,7 @@ unit-tests:
   needs: [checks]
   script:
     - python3 "$DELIVERY_CONTROL_DIR/ci/setup_android.py"
-    - sh gradlew --no-daemon --max-workers=1 '-Dorg.gradle.jvmargs=-Xmx768m -XX:MaxMetaspaceSize=384m -Dfile.encoding=UTF-8' -Pkotlin.compiler.execution.strategy=in-process testDebugUnitTest jacocoTestReport
+    - sh gradlew --no-daemon --max-workers=1 '-Dorg.gradle.jvmargs=-Xmx512m -XX:MaxMetaspaceSize=256m -XX:ReservedCodeCacheSize=96m -XX:MaxDirectMemorySize=64m -Dfile.encoding=UTF-8' -Pkotlin.compiler.execution.strategy=in-process testDebugUnitTest jacocoTestReport
   artifacts:
     paths:
       - app/build/reports/jacoco/
@@ -67,7 +67,7 @@ release-build:
       artifacts: false
   script:
     - python3 "$DELIVERY_CONTROL_DIR/ci/setup_android.py"
-    - sh gradlew --no-daemon --max-workers=1 '-Dorg.gradle.jvmargs=-Xmx768m -XX:MaxMetaspaceSize=384m -Dfile.encoding=UTF-8' -Pkotlin.compiler.execution.strategy=in-process assembleDebug assembleRelease cyclonedxBom
+    - sh gradlew --no-daemon --max-workers=1 '-Dorg.gradle.jvmargs=-Xmx512m -XX:MaxMetaspaceSize=256m -XX:ReservedCodeCacheSize=96m -XX:MaxDirectMemorySize=64m -Dfile.encoding=UTF-8' -Pkotlin.compiler.execution.strategy=in-process assembleDebug assembleRelease cyclonedxBom
     - python3 -c 'import hashlib,json,os,pathlib; p=pathlib.Path("app/build/outputs/apk/release/app-release-unsigned.apk"); pathlib.Path("release-input.json").write_text(json.dumps({"sha":os.environ["CI_COMMIT_SHA"],"pipeline":os.environ["CI_PIPELINE_ID"],"unsigned_sha256":hashlib.sha256(p.read_bytes()).hexdigest()}))'
   artifacts:
     paths:

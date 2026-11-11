@@ -16,7 +16,9 @@ class GitlabDeliveryTests(unittest.TestCase):
     def test_builds_are_bounded_and_signer_does_not_execute_candidate_code(self):
         workflow = (ROOT / '.gitlab-ci.yml').read_text()
         self.assertIn('--max-workers=1', workflow)
-        self.assertIn('-Xmx768m', workflow)
+        self.assertIn('-Xmx512m', workflow)
+        self.assertIn('-XX:MaxMetaspaceSize=256m', workflow)
+        self.assertIn('-XX:ReservedCodeCacheSize=96m', workflow)
         release = workflow.split('\nrelease:\n')[1]
         self.assertIn('job: security', release)
         self.assertIn('cache: []', release)
